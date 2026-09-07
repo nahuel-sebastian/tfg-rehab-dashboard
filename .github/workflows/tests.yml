@@ -1,0 +1,28 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend-tests:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependencias
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+
+      # Sin MySQL en CI: los endpoints degradan a CSV/mock, así que la suite
+      # se ejecuta igual (los tests de integración CSV hacen skip si no hay datos).
+      - name: Ejecutar tests
+        working-directory: backend
+        run: python -m pytest -q
