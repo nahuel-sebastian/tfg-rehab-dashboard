@@ -1,0 +1,82 @@
+# Despliegue completo del panel clínico: base de datos, API e interfaz.
+#
+#   1. cp .env.example .env   y rellenar las credenciales
+#   2. docker compose up --build
+#   3. abrir http://localhost
+#
+# La base arranca vacía. Para poblarla con los pacientes sintéticos:
+#   docker compose exec api python scripts/seed_synthetic_patients.py --preset todos
+
+services:
+
+  mysql:
+    image: mysql:8.0
+    container_name: tfg-mysql
+    command: --log-bin-trust-function-creators=1
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "3307:3306"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -p${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # Construye el esquema desde db/flyway/. Se ejecuta una vez y termina.
+  flyway:
+    image: flyway/flyway:9
+    container_name: tfg-flyway
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - ./db/flyway:/flyway/sql:ro
+    command:
+      - -url=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC
+      - -user=${MYSQL_USER}
+      - -password=${MYSQL_PASSWORD}
+      - -locations=filesystem:/flyway/sql
+      - -baselineOnMigrate=true
+      - -connectRetries=60
+      - -connectRetriesInterval=5
+      - migrate
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: tfg-backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      flyway:
+        condition: service_completed_successfully
+    environment:
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+    volumes:
+      - ./backend:/app/backend
+      - ./scripts:/app/scripts
+
+  frontend:
+    image: nginx:alpine
+    container_name: tfg-frontend
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+
+volumes:
+  mysql_data:

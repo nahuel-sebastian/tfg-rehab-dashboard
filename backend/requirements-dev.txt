@@ -1,0 +1,4 @@
+# Dependencias solo para desarrollo/tests (no necesarias en producción)
+-r requirements.txt
+pytest==9.0.3
+httpx==0.28.1

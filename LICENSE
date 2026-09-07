@@ -1,0 +1,18 @@
+Copyright (c) 2026 Nahuel Sebastián Vargas
+
+Este programa se entrega a la Universidad Carlos III de Madrid en el marco del
+Trabajo de Fin de Grado del mismo título.
+
+Se concede a la Universidad Carlos III de Madrid, y en particular al
+departamento responsable de la plataforma de rehabilitación sobre la que este
+sistema opera, permiso para usar, modificar, extender y desplegar este programa
+con fines docentes y de investigación, así como para incorporarlo a sus propios
+desarrollos.
+
+Fuera de ese ámbito, todos los derechos quedan reservados. El acceso al código
+no implica autorización para redistribuirlo a terceros ni para su explotación
+comercial.
+
+Las bibliotecas de terceros incluidas en frontend/vendor/ y las tipografías de
+frontend/css/fonts/ se rigen por sus propias licencias, que se conservan junto a
+los ficheros correspondientes.

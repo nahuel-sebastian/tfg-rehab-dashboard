@@ -1,0 +1,1824 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlexPendant HMI - Sistema de Rehabilitación</title>
+
+    <!-- Dependencias auto-alojadas (funcionamiento sin internet en estación clínica) -->
+    <!-- Tailwind 3.4.16 (script CDN local) · Plotly 2.27.0 · jsPDF 2.5.1 + autoTable 3.8.2 -->
+    <script src="vendor/tailwindcss.js"></script>
+    <script src="vendor/plotly-2.27.0.min.js"></script>
+    <script src="vendor/jspdf.umd.min.js"></script>
+    <script src="vendor/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- Configuración (Tailwind + API) — DEBE ir antes de Vue -->
+    <script src="js/config.js"></script>
+
+    <!-- Estilos propios -->
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body class="antialiased p-4 md:p-6">
+
+    <div id="app" class="max-w-7xl mx-auto">
+
+        <!-- ============================================================= -->
+        <!-- OVERLAY DE CARGA                                              -->
+        <!-- ============================================================= -->
+        <div v-if="cargando" class="loading-overlay" role="status" aria-live="polite">
+            <div class="loading-spinner"></div>
+            <span>Cargando…</span>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- HEADER + BREADCRUMB + TOGGLE TEMA                             -->
+        <!-- ============================================================= -->
+        <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-t-border pb-4 mb-6 gap-4">
+            <div>
+                <h1 class="text-2xl md:text-3xl font-bold text-t-accent tracking-wider cursor-pointer"
+                    @click="irA('pacientes')">
+                    ROBOTICS HMI
+                </h1>
+                <p class="text-t-muted text-sm mt-1">
+                    Módulo de Análisis Clínico y Reproducción 3D
+                </p>
+            </div>
+
+            <div class="flex items-center gap-3 flex-wrap">
+                <!-- Breadcrumb -->
+                <nav class="flex items-center gap-2 text-sm text-t-muted flex-wrap">
+                    <span class="cursor-pointer hover:text-t-accent transition"
+                        :class="{ 'text-t-accent font-bold': vista === 'pacientes' }"
+                        @click="irA('pacientes')">
+                        Pacientes
+                    </span>
+
+                    <template v-if="pacienteSeleccionado">
+                        <span class="text-t-dimmed">›</span>
+                        <span class="cursor-pointer hover:text-t-accent transition"
+                            :class="{ 'text-t-accent font-bold': vista === 'sesiones' }"
+                            @click="irA('sesiones')">
+                            {{ nombrePaciente(pacienteSeleccionado) }}
+                        </span>
+                    </template>
+
+                    <template v-if="sesionSeleccionada">
+                        <span class="text-t-dimmed">›</span>
+                        <span class="cursor-pointer hover:text-t-accent transition"
+                            :class="{ 'text-t-accent font-bold': vista === 'juegos' }"
+                            @click="irA('juegos')">
+                            {{ labelSesion(sesionSeleccionada) }}
+                        </span>
+                    </template>
+
+                    <template v-if="juegoSeleccionado">
+                        <span class="text-t-dimmed">›</span>
+                        <span class="text-t-accent font-bold">
+                            {{ juegoSeleccionado.label || juegoSeleccionado.game_name }}
+                        </span>
+                    </template>
+                </nav>
+
+                <!-- Badge VR -->
+                <span v-if="dd && dd.is_vr"
+                    class="badge-vr-header text-xs font-mono px-3 py-1 rounded-full flex items-center gap-1.5 shrink-0">
+                    <span class="w-2 h-2 rounded-full bg-purple-400 pulse-dot inline-block"></span>
+                    VR
+                </span>
+
+                <!-- Toggle Tema -->
+                <button @click="toggleTema" class="theme-toggle"
+                    :title="temaOscuro ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'"
+                    :aria-label="temaOscuro ? 'Cambiar a tema claro' : 'Cambiar a tema oscuro'">
+                    {{ temaOscuro ? '☀️' : '🌙' }}
+                </button>
+            </div>
+        </header>
+
+        <!-- Banner de error -->
+        <div v-if="mensajeError"
+            class="severity-high px-4 py-3 rounded mb-6 text-sm flex justify-between items-center">
+            <span>{{ mensajeError }}</span>
+            <button @click="mensajeError = ''" class="opacity-70 hover:opacity-100 ml-4">✕</button>
+        </div>
+
+
+        <!-- ============================================================= -->
+        <!-- VISTA 1: DIRECTORIO DE PACIENTES                              -->
+        <!-- ============================================================= -->
+        <div v-if="vista === 'pacientes'">
+
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-lg font-semibold text-t-text">Directorio de Pacientes</h2>
+                <button @click="cargarPacientes"
+                    class="theme-accent-bg font-bold py-2 px-5 rounded shadow-lg transition text-sm">
+                    Cargar Pacientes
+                </button>
+            </div>
+
+            <!-- Búsqueda de pacientes -->
+            <div v-if="pacientes.length" class="mb-4">
+                <div class="relative">
+                    <input
+                        type="text"
+                        v-model="filtroPaciente"
+                        placeholder="Buscar paciente por nombre o ID..."
+                        class="w-full bg-t-panel border border-t-border rounded-xl pl-9 pr-4 py-2.5 text-sm text-t-text
+                               focus:outline-none focus:border-t-accent transition placeholder:text-t-dimmed font-mono">
+                    <button v-if="filtroPaciente"
+                        @click="filtroPaciente = ''"
+                        class="absolute right-3 top-1/2 -translate-y-1/2 text-t-dimmed hover:text-t-text transition text-lg leading-none">
+                        ✕
+                    </button>
+                </div>
+                <p v-if="filtroPaciente" class="text-xs text-t-dimmed mt-1.5 font-mono ml-1">
+                    {{ pacientesFiltrados.length }} resultado(s) de {{ pacientes.length }}
+                </p>
+            </div>
+
+            <div v-if="!pacientes.length" class="flex flex-col items-center justify-center h-64 text-t-dimmed">
+                <p class="text-xl font-light">Sin datos de pacientes</p>
+                <p class="text-sm mt-2">Pulsa "Cargar Pacientes" para conectar con la API</p>
+            </div>
+
+            <div v-else-if="!pacientesFiltrados.length" class="flex flex-col items-center justify-center h-48 text-t-dimmed">
+                <p class="text-xl font-light">Sin resultados para "{{ filtroPaciente }}"</p>
+            </div>
+
+            <div v-else class="bg-t-panel rounded-xl border border-t-border shadow-xl overflow-hidden">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="border-b border-t-border text-t-dimmed text-xs uppercase tracking-widest">
+                            <th class="text-left px-6 py-4">Paciente</th>
+                            <th class="text-center px-6 py-4">Sesiones</th>
+                            <th class="text-center px-6 py-4">Datos</th>
+                            <th class="text-center px-6 py-4">Mano dom.</th>
+                            <th class="text-right px-6 py-4"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="p in pacientesFiltrados" :key="p._key"
+                            class="border-b border-t-border/50 row-hover cursor-pointer"
+                            @click="seleccionarPaciente(p)">
+
+                            <!-- Nombre -->
+                            <td class="px-6 py-4 font-semibold text-t-blue">
+                                {{ p.source === 'csv' ? p.name : ((p.UserName || '') + ' ' + (p.UserSurname1 || '')).trim() || ('Paciente #' + p.UserID) }}
+                            </td>
+
+                            <!-- Sesiones -->
+                            <td class="px-6 py-4 text-center">
+                                <span class="bg-t-card px-3 py-1 rounded-full text-xs font-mono text-t-text">
+                                    {{ p.total_sesiones }}
+                                </span>
+                            </td>
+
+                            <!-- Badges de modalidad / juego -->
+                            <td class="px-6 py-4 text-center">
+                                <div class="flex gap-1 justify-center flex-wrap">
+                                    <template v-if="p.source === 'csv'">
+                                        <span v-if="p.has_desktop"
+                                            class="badge-desktop text-[12px] font-mono px-2 py-0.5 rounded">
+                                            Desktop
+                                        </span>
+                                        <span v-if="p.has_vr"
+                                            class="badge-vr text-[12px] font-mono px-2 py-0.5 rounded">
+                                            VR
+                                        </span>
+                                        <span class="badge-neutral text-[12px] font-mono px-2 py-0.5 rounded">
+                                            BBT
+                                        </span>
+                                    </template>
+                                    <template v-else>
+                                        <span v-if="p.has_bbt"
+                                            class="badge-neutral text-[12px] font-mono px-2 py-0.5 rounded">
+                                            BBT
+                                        </span>
+                                        <span v-if="p.has_fruits"
+                                            class="badge-green text-[12px] font-mono px-2 py-0.5 rounded">
+                                            Fruits
+                                        </span>
+                                        <span class="badge-neutral text-[12px] font-mono px-2 py-0.5 rounded">
+                                            SQL
+                                        </span>
+                                    </template>
+                                </div>
+                            </td>
+
+                            <!-- Mano dominante -->
+                            <td class="px-6 py-4 text-center text-xs">
+                                <span v-if="p.source === 'csv'" class="text-t-dimmed">—</span>
+                                <span v-else :class="p.LeftHanded ? 'text-t-cyan' : 'text-t-green'">
+                                    {{ p.LeftHanded ? 'Izquierda' : 'Derecha' }}
+                                </span>
+                            </td>
+
+                            <td class="px-6 py-4 text-right text-t-accent text-lg">›</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+
+        <!-- ============================================================= -->
+        <!-- VISTA 2: SESIONES DE UN PACIENTE                              -->
+        <!-- ============================================================= -->
+        <div v-if="vista === 'sesiones'">
+
+            <!-- Banner modo comparación -->
+            <div v-if="modoComparacion" class="mb-4 px-5 py-3 rounded-xl border border-t-accent bg-t-accent/10 flex items-center justify-between font-mono text-sm">
+                <span class="text-t-accent font-bold">⟷ Modo comparación activo — selecciona la segunda sesión</span>
+                <button @click="cancelarComparacion()" class="theme-btn-secondary px-3 py-1 rounded text-xs">✕ Cancelar</button>
+            </div>
+
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h2 class="text-lg font-semibold text-t-text">
+                        Sesiones de
+                        <span class="text-t-blue">{{ nombrePaciente(pacienteSeleccionado) }}</span>
+                    </h2>
+                    <p class="text-xs text-t-dimmed mt-1 font-mono">
+                        {{ sesionesFiltradas.length }} / {{ sesiones.length }} sesión(es)
+                    </p>
+                </div>
+                <div class="flex gap-2">
+                    <button v-if="pacienteSeleccionado && (pacienteSeleccionado.source === 'csv' || pacienteSeleccionado.has_bbt)"
+                        @click="verEvolucion()"
+                        class="theme-accent-bg font-bold py-2 px-5 rounded shadow-lg transition text-sm">
+                        Evolución BBT
+                    </button>
+                    <button v-if="pacienteSeleccionado && pacienteSeleccionado.source === 'sql' && pacienteSeleccionado.has_fruits"
+                        @click="verEvolucionFruits()"
+                        class="theme-accent-bg font-bold py-2 px-5 rounded shadow-lg transition text-sm">
+                        Evolución Fruits
+                    </button>
+                    <button @click="irA('pacientes')"
+                        class="theme-btn-secondary py-2 px-5 rounded transition text-sm">
+                        ← Pacientes
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filtro por rango de fechas -->
+            <div class="bg-t-panel border border-t-border rounded-xl px-5 py-3 mb-5 flex flex-wrap items-center gap-4">
+                <span class="text-xs font-mono text-t-dimmed uppercase tracking-widest">Filtrar por fecha</span>
+                <div class="flex items-center gap-2">
+                    <label class="text-xs text-t-muted">Desde</label>
+                    <input type="date" v-model="filtroFechaDesde"
+                        class="bg-t-card border border-t-border rounded px-2 py-1 text-xs font-mono text-t-text focus:outline-none focus:border-t-accent">
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-xs text-t-muted">Hasta</label>
+                    <input type="date" v-model="filtroFechaHasta"
+                        class="bg-t-card border border-t-border rounded px-2 py-1 text-xs font-mono text-t-text focus:outline-none focus:border-t-accent">
+                </div>
+                <button v-if="filtroFechaDesde || filtroFechaHasta"
+                    @click="filtroFechaDesde = ''; filtroFechaHasta = ''"
+                    class="theme-btn-secondary text-xs px-3 py-1 rounded font-mono">
+                    ✕ Limpiar
+                </button>
+            </div>
+
+            <div v-if="!sesionesFiltradas.length" class="flex flex-col items-center justify-center h-48 text-t-dimmed">
+                <p class="text-xl font-light">
+                    {{ sesiones.length ? 'Ninguna sesión coincide con el filtro' : 'No hay sesiones registradas' }}
+                </p>
+            </div>
+
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div v-for="s in sesionesFiltradas" :key="s.SessionID"
+                    class="bg-t-panel p-5 rounded-xl border shadow-xl
+                           hover:border-t-accent/50 cursor-pointer transition-all duration-200 group"
+                    :class="s.isCSV && s.is_vr
+                        ? 'border-purple-500/40'
+                        : s.isCSV
+                            ? 'border-blue-500/40'
+                            : 'border-t-border'"
+                    @click="seleccionarSesion(s)">
+
+                    <div class="flex justify-between items-start mb-3">
+                        <!-- Badge de tipo -->
+                        <span v-if="s.isCSV" class="text-xs font-mono px-2 py-0.5 rounded"
+                            :class="s.is_vr ? 'badge-vr' : 'badge-desktop'">
+                            {{ s.is_vr ? 'BBT Meta (VR)' : 'BBT Escritorio' }}
+                        </span>
+                        <span v-else class="font-mono text-xs text-t-dimmed">
+                            Sesión #{{ s.SessionID }}
+                        </span>
+                        <span class="text-t-accent opacity-0 group-hover:opacity-100 transition-opacity text-lg">→</span>
+                    </div>
+
+                    <div class="flex justify-between mb-2">
+                        <span class="text-t-muted text-xs">Fecha / Hora</span>
+                        <span class="font-mono text-sm text-t-text">{{ formatearFecha(s.Date) }}</span>
+                    </div>
+
+                    <!-- Juegos (SQL) -->
+                    <div v-if="!s.isCSV && s.games_summary && s.games_summary.length" class="flex justify-between items-center mt-1">
+                        <span class="text-t-muted text-xs">Juegos</span>
+                        <div class="flex gap-1 flex-wrap justify-end">
+                            <span v-for="g in s.games_summary" :key="g"
+                                class="text-[12px] font-mono px-2 py-0.5 rounded"
+                                :class="g === 'BBT' ? 'badge-green' : 'badge-vr'">
+                                {{ g }}
+                            </span>
+                        </div>
+                    </div>
+                    <!-- Manos (CSV) -->
+                    <div v-if="s.isCSV" class="flex justify-between mt-1">
+                        <span class="text-t-muted text-xs">Pruebas</span>
+                        <span class="font-mono text-xs text-t-accent">{{ s.games?.length || 0 }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ============================================================= -->
+        <!-- VISTA 3: JUEGOS EN UNA SESIÓN                                 -->
+        <!-- ============================================================= -->
+        <div v-if="vista === 'juegos'">
+
+            <!-- Banner modo comparación -->
+            <div v-if="modoComparacion" class="mb-4 px-5 py-3 rounded-xl border border-t-accent bg-t-accent/10 flex items-center justify-between font-mono text-sm">
+                <span class="text-t-accent font-bold">⟷ Selecciona el juego Fruits para comparar con <span class="text-t-blue">{{ ddComparar?.date?.slice(0,10) }}</span></span>
+                <button @click="cancelarComparacion()" class="theme-btn-secondary px-3 py-1 rounded text-xs">✕ Cancelar</button>
+            </div>
+
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-lg font-semibold text-t-text">
+                        Juegos en <span class="text-t-accent font-mono">{{ labelSesion(sesionSeleccionada) }}</span>
+                    </h2>
+                    <p class="text-xs text-t-dimmed mt-1">
+                        Selecciona una instancia de juego para ver el análisis
+                    </p>
+                </div>
+                <button @click="irA('sesiones')"
+                    class="theme-btn-secondary py-2 px-5 rounded transition text-sm">
+                    ← Sesiones
+                </button>
+            </div>
+
+            <div v-if="!juegos.length" class="flex flex-col items-center justify-center h-48 text-t-dimmed">
+                <p class="text-xl font-light">No se encontraron juegos en esta sesión</p>
+            </div>
+
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+
+                <!-- Tarjeta PAREJA: BBT Derecha + Izquierda juntas -->
+                <template v-for="(item, idx) in juegosPareados" :key="idx">
+
+                    <div v-if="item.tipo === 'par'"
+                        class="bg-t-panel p-5 rounded-xl border border-t-accent/40 shadow-xl transition-all duration-200">
+
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <span class="text-t-accent font-bold text-lg">{{ item.game_name }}</span>
+                                <p class="text-xs text-t-dimmed font-mono mt-1">BBT — Sesión completa</p>
+                            </div>
+                            <div class="flex gap-1">
+                                <span class="badge-green text-[12px] font-mono px-2 py-0.5 rounded">D</span>
+                                <span class="text-[12px] font-mono px-2 py-0.5 rounded text-t-cyan bg-cyan-900/30 border border-cyan-700/40">I</span>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2 mb-4">
+                            <div class="flex justify-between items-center">
+                                <span class="text-t-muted text-xs">Hora</span>
+                                <span class="font-mono text-sm text-t-text">{{ formatearFecha(item.session_date) }}</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-t-muted text-xs">Entorno</span>
+                                <span class="text-xs font-mono px-2 py-0.5 rounded"
+                                    :class="item.is_vr ? 'badge-vr' : 'badge-desktop'">
+                                    {{ item.is_vr ? 'VR' : 'Escritorio' }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Acciones -->
+                        <div class="flex gap-2 pt-3 border-t border-t-border/40">
+                            <button @click="compararManosBBT(item.derecha, item.izquierda)"
+                                class="theme-accent-bg flex-1 py-1.5 rounded text-xs font-mono font-bold">
+                                ⟺ Comparar D+I
+                            </button>
+                            <button @click="seleccionarJuego(item.derecha)"
+                                class="theme-btn-secondary px-3 py-1.5 rounded text-xs font-mono text-t-green">
+                                D
+                            </button>
+                            <button @click="seleccionarJuego(item.izquierda)"
+                                class="theme-btn-secondary px-3 py-1.5 rounded text-xs font-mono text-t-cyan">
+                                I
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Tarjeta INDIVIDUAL (juego sin pareja o Fruits) -->
+                    <div v-else
+                        class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl
+                               hover:border-t-accent/50 cursor-pointer transition-all duration-200 group"
+                        @click="seleccionarJuego(item.juego)">
+
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <span class="text-t-accent font-bold text-lg">{{ item.juego.game_name }}</span>
+                                <p class="text-xs text-t-dimmed font-mono mt-1">
+                                    {{ item.juego.game_type.replace('_', ' · ').toUpperCase() }}
+                                </p>
+                            </div>
+                            <span class="text-t-accent opacity-0 group-hover:opacity-100 transition-opacity text-lg">→</span>
+                        </div>
+
+                        <div class="space-y-2">
+                            <!-- Hora -->
+                            <div class="flex justify-between items-center">
+                                <span class="text-t-muted text-xs">Hora</span>
+                                <span class="font-mono text-sm text-t-text">
+                                    {{ formatearFecha(item.juego.session_date || item.juego.date) }}
+                                </span>
+                            </div>
+                            <!-- Mano (BBT individual) -->
+                            <div v-if="item.juego.hand_label" class="flex justify-between items-center">
+                                <span class="text-t-muted text-xs">Mano</span>
+                                <span class="font-mono text-sm font-semibold"
+                                    :class="item.juego.hand_label === 'Derecha' ? 'text-t-green' : 'text-t-cyan'">
+                                    {{ item.juego.hand_label }}
+                                </span>
+                            </div>
+                            <!-- Modo (Fruits) -->
+                            <div v-if="item.juego.game_mode" class="flex justify-between items-center">
+                                <span class="text-t-muted text-xs">Modo</span>
+                                <span class="font-mono text-sm text-t-accent">{{ item.juego.game_mode }}</span>
+                            </div>
+                            <!-- Entorno -->
+                            <div class="flex justify-between items-center">
+                                <span class="text-t-muted text-xs">Entorno</span>
+                                <span class="text-xs font-mono px-2 py-0.5 rounded"
+                                    :class="item.juego.is_vr ? 'badge-vr' : 'badge-desktop'">
+                                    {{ item.juego.is_vr ? 'VR' : 'Escritorio' }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                </template>
+            </div>
+        </div>
+
+
+        <!-- ============================================================= -->
+        <!-- VISTA 4a: DASHBOARD BBT                                       -->
+        <!-- ============================================================= -->
+        <div v-if="vista === 'dashboard' && dd && dd.game_type === 'bbt'">
+
+            <!-- Barra de acciones -->
+            <div class="flex justify-between items-center mb-5">
+                <div>
+                    <h2 class="text-lg font-semibold text-t-text">Dashboard BBT</h2>
+                    <p class="text-xs text-t-dimmed font-mono mt-0.5">
+                        {{ dd.patient }} · {{ dd.date }} · Mano {{ manoTextoBBT(dd.hand) }}
+                    </p>
+                </div>
+                <div class="flex gap-2">
+                    <button @click="irA('juegos')" class="theme-btn-secondary py-2 px-4 rounded transition text-sm">← Juegos</button>
+                    <button @click="copiarResumenClinico()"
+                        class="theme-btn-secondary py-2 px-4 rounded transition text-sm"
+                        title="Copia un resumen estructurado de la sesión para pegarlo en la historia clínica">
+                        {{ resumenCopiado ? 'Resumen copiado' : 'Copiar resumen' }}
+                    </button>
+                    <button @click="abrirModalPDF()"
+                        class="theme-accent-bg font-bold py-2 px-5 rounded shadow-lg transition text-sm flex items-center gap-2">
+                        Exportar PDF
+                    </button>
+                </div>
+            </div>
+
+            <!-- Layout libro: índice + contenido -->
+            <div class="book-container">
+
+                <!-- PÁGINA IZQUIERDA: ÍNDICE -->
+                <nav class="book-index">
+                    <div class="book-index-header">
+                        <p class="text-[12px] text-t-dimmed uppercase tracking-widest font-mono mb-1">Índice</p>
+                        <p class="text-xs text-t-muted font-mono">{{ manoTextoBBT(dd.hand) === 'Derecha' ? '→' : manoTextoBBT(dd.hand) === 'Izquierda' ? '←' : '↔' }} {{ manoTextoBBT(dd.hand) }}</p>
+                    </div>
+                    <div class="book-index-items">
+                        <button @click="cambiarSeccionBBT('info')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaBBT === 'info' }">
+                            Información
+                        </button>
+                        <button v-if="dd.metricas" @click="cambiarSeccionBBT('biomecanica')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaBBT === 'biomecanica' }">
+                            Biomecánica
+                        </button>
+                        <button @click="cambiarSeccionBBT('reproduccion')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaBBT === 'reproduccion' }">
+                            Reproducción 3D
+                        </button>
+                        <button @click="cambiarSeccionBBT('velocidad')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaBBT === 'velocidad' }">
+                            Perfil de Velocidad
+                        </button>
+                        <button v-if="dd.indice_fatiga || (dd.grasp_segments && dd.grasp_segments.length)"
+                            @click="cambiarSeccionBBT('fatiga')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaBBT === 'fatiga' }">
+                            Fatiga & Agarres
+                        </button>
+                        <button v-if="dd.penalizaciones" @click="cambiarSeccionBBT('penalizaciones')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaBBT === 'penalizaciones' }">
+                            Penalizaciones
+                        </button>
+                        <button v-if="dd.scores_por_frame && dd.scores_por_frame.length"
+                            @click="cambiarSeccionBBT('puntuacion')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaBBT === 'puntuacion' }">
+                            Puntuación
+                        </button>
+                    </div>
+                </nav>
+
+                <!-- PÁGINA DERECHA: CONTENIDO -->
+                <div class="book-content">
+
+                    <!-- Sección: Información del Paciente (default) -->
+                    <div v-show="seccionActivaBBT === 'info'" class="space-y-5">
+                        <div class="bg-t-panel p-6 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-5 font-mono">Información de Sesión</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-3">
+                                <div class="flex justify-between border-b border-t-border/50 pb-2">
+                                    <span class="text-t-muted text-sm">Paciente</span>
+                                    <span class="font-bold text-t-blue">{{ dd.patient }}</span>
+                                </div>
+                                <div class="flex justify-between border-b border-t-border/50 pb-2">
+                                    <span class="text-t-muted text-sm">Tarea</span>
+                                    <span class="font-mono text-t-text text-sm">{{ dd.task_name }}</span>
+                                </div>
+                                <div class="flex justify-between items-center border-b border-t-border/50 pb-2">
+                                    <span class="text-t-muted text-sm">Entorno</span>
+                                    <span class="text-xs font-mono px-2 py-0.5 rounded"
+                                        :class="dd.is_vr ? 'badge-vr' : 'badge-desktop'">
+                                        {{ dd.is_vr ? 'VR' : 'Escritorio' }}
+                                    </span>
+                                </div>
+                                <div class="flex justify-between border-b border-t-border/50 pb-2">
+                                    <span class="text-t-muted text-sm">Fecha</span>
+                                    <span class="font-mono text-t-muted text-sm">{{ dd.date }}</span>
+                                </div>
+                                <div v-if="dd.time_limit" class="flex justify-between border-b border-t-border/50 pb-2">
+                                    <span class="text-t-muted text-sm">Tiempo Límite</span>
+                                    <span class="font-mono text-t-accent text-lg">{{ dd.time_limit }}s</span>
+                                </div>
+                                <div class="flex justify-between pb-1">
+                                    <span class="text-t-muted text-sm">Mano Evaluada</span>
+                                    <span class="font-mono text-sm font-semibold"
+                                        :class="manoTextoBBT(dd.hand) === 'Derecha' ? 'text-t-green' : 'text-t-cyan'">
+                                        {{ manoTextoBBT(dd.hand) }}
+                                    </span>
+                                </div>
+                            </div>
+                            <div v-if="dd.source === 'mock_json'"
+                                class="severity-medium text-xs p-2 rounded text-center font-mono mt-5">
+                                Atención: datos de demostración, no del paciente
+                            </div>
+                            <div v-if="dd.posiciones_objetos && dd.posiciones_objetos.length"
+                                class="info-green mt-5 text-sm p-3 rounded font-mono flex justify-between items-center">
+                                <span>Posiciones de agarre registradas</span>
+                                <span class="font-bold text-xl">{{ dd.posiciones_objetos.length }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Análisis Biomecánico -->
+                    <div v-show="seccionActivaBBT === 'biomecanica'" class="space-y-5">
+                        <div v-if="dd.metricas" class="bg-t-panel p-6 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-5 font-mono">Análisis Biomecánico</h2>
+                            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                <div class="bg-t-card p-4 rounded-lg text-center border border-t-card-border">
+                                    <div class="text-[12px] text-t-dimmed uppercase tracking-wider">Trayectoria</div>
+                                    <div class="text-2xl font-bold text-t-text font-mono mt-1">
+                                        {{ dd.metricas.distancia_m }} <span class="text-xs text-t-muted">m</span>
+                                    </div>
+                                </div>
+                                <div class="bg-t-card p-4 rounded-lg text-center border border-t-card-border">
+                                    <div class="text-[12px] text-t-dimmed uppercase tracking-wider">Vel. Media</div>
+                                    <div class="text-2xl font-bold text-t-cyan font-mono mt-1">
+                                        {{ dd.metricas.velocidad_media_ms }} <span class="text-xs text-t-muted">m/s</span>
+                                    </div>
+                                </div>
+                                <div class="phase-alcance p-4 rounded-lg text-center">
+                                    <div class="text-[12px] text-alcance uppercase tracking-wider">T. Alcance</div>
+                                    <div class="text-2xl font-bold text-alcance font-mono mt-1">
+                                        {{ dd.metricas.tiempo_alcance_s }} <span class="text-xs">s</span>
+                                    </div>
+                                </div>
+                                <div class="phase-transporte p-4 rounded-lg text-center">
+                                    <div class="text-[12px] text-transporte uppercase tracking-wider">T. Transporte</div>
+                                    <div class="text-2xl font-bold text-transporte font-mono mt-1">
+                                        {{ dd.metricas.tiempo_transporte_s }} <span class="text-xs">s</span>
+                                    </div>
+                                </div>
+                                <div class="bg-t-card p-4 rounded-lg text-center border border-t-card-border">
+                                    <div class="text-[12px] text-t-dimmed uppercase tracking-wider">Vel. Pico</div>
+                                    <div class="text-2xl font-bold text-t-yellow font-mono mt-1">
+                                        {{ dd.metricas.velocidad_pico_ms }} <span class="text-xs text-t-muted">m/s</span>
+                                    </div>
+                                </div>
+                                <div class="bg-t-card p-4 rounded-lg text-center border border-t-card-border">
+                                    <div class="text-[12px] text-t-dimmed uppercase tracking-wider">Transiciones</div>
+                                    <div class="text-2xl font-bold text-t-text font-mono mt-1">
+                                        {{ dd.metricas.num_transiciones }}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-5 pt-4 border-t border-t-border/50">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-[12px] text-t-dimmed uppercase tracking-wider">Ratio de Eficiencia</span>
+                                    <span class="font-mono font-bold text-sm" :class="colorEficiencia">
+                                        {{ dd.metricas.ratio_eficiencia_pct }}%
+                                    </span>
+                                </div>
+                                <div class="w-full bg-t-card rounded-full h-3 overflow-hidden">
+                                    <div class="h-full rounded-full severity-bar"
+                                        :class="bgEficiencia"
+                                        :style="{ width: dd.metricas.ratio_eficiencia_pct + '%' }">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-if="dd.metricas" class="bg-t-panel p-6 rounded-xl border border-t-border shadow-xl">
+                            <div class="flex justify-between items-center mb-2">
+                                <h2 class="text-t-dimmed text-xs uppercase tracking-widest font-mono">Perfil Motor</h2>
+                                <span class="text-[12px] text-t-dimmed font-mono">vs. referencia clínica</span>
+                            </div>
+                            <div id="plotRadar" style="width: 100%; height: 300px;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Reproducción 3D -->
+                    <div v-show="seccionActivaBBT === 'reproduccion'" class="space-y-5">
+                        <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                            <div class="flex justify-between items-center mb-3">
+                                <h2 class="text-t-dimmed text-xs uppercase tracking-widest font-mono">
+                                    Reconstrucción Espacial 3D
+                                </h2>
+                                <div class="flex items-center gap-2">
+                                    <div v-if="dd.posiciones_objetos && dd.posiciones_objetos.length"
+                                        class="flex items-center gap-1.5 text-xs text-t-green font-mono">
+                                        <span class="w-2.5 h-2.5 inline-block marker-agarre"></span>
+                                        {{ dd.posiciones_objetos.length }} agarres
+                                    </div>
+                                    <button @click="toggleHeatmap()"
+                                        class="text-xs px-3 py-1 rounded-lg border transition font-mono"
+                                        :class="mostrarHeatmap
+                                            ? 'border-t-accent text-t-accent bg-t-accent/10'
+                                            : 'border-t-border text-t-muted hover:border-t-accent hover:text-t-accent'">
+                                        Heatmap
+                                    </button>
+                                    <button @click="pantallaCompleta3D()"
+                                        title="Pantalla completa"
+                                        class="text-xs px-2 py-1 rounded-lg border border-t-border text-t-muted hover:border-t-accent hover:text-t-accent transition font-mono">
+                                        Pantalla completa
+                                    </button>
+                                </div>
+                            </div>
+                            <div v-if="dd.grasp_segments && dd.grasp_segments.length" class="flex items-center gap-2 mb-3">
+                                <label class="text-t-dimmed text-xs font-mono uppercase tracking-widest">Filtrar por agarre</label>
+                                <select @change="seleccionarAgarre($event.target.value === '' ? null : Number($event.target.value))"
+                                    class="text-xs font-mono bg-t-card border border-t-border rounded px-2 py-1 text-t-text focus:outline-none focus:border-t-accent transition cursor-pointer">
+                                    <option value="">Todos ({{ dd.grasp_segments.length }} agarres)</option>
+                                    <option v-for="seg in dd.grasp_segments" :key="seg.num"
+                                        :value="seg.num" :selected="agarreSeleccionado === seg.num">
+                                        Agarre #{{ seg.num }} — {{ seg.duracion_transporte_frames }} fr transporte · {{ seg.velocidad_media_ms?.toFixed(3) }} m/s
+                                    </option>
+                                </select>
+                            </div>
+                            <!-- Aviso si el navegador no tiene WebGL (la trayectoria 3D lo requiere) -->
+                            <div v-if="!webglDisponible" class="theme-plot-bg rounded-lg border p-6 flex flex-col items-center justify-center text-center gap-3" style="min-height: 500px;">
+                                <h3 class="text-t-text font-semibold">Aceleración 3D no disponible</h3>
+                                <p class="text-t-muted text-sm max-w-md">
+                                    La trayectoria 3D necesita <strong>WebGL</strong>, que está desactivado en este navegador.
+                                    El resto del análisis (métricas, velocidad, puntuación) funciona con normalidad.
+                                </p>
+                                <p class="text-t-dimmed text-xs font-mono max-w-md">
+                                    Para activarlo: ajustes del navegador → Sistema → «Usar aceleración por hardware» → reiniciar el navegador.
+                                </p>
+                            </div>
+                            <div v-show="webglDisponible" id="plot3d" style="width: 100%; height: 500px;"
+                                class="theme-plot-bg rounded-lg border"></div>
+                            <div v-if="mostrarHeatmap" class="mt-4 pt-4 border-t border-t-border/40">
+                                <div class="flex items-center justify-between gap-3 mb-2 flex-wrap">
+                                    <h3 class="text-t-dimmed text-xs uppercase tracking-widest font-mono">
+                                        Mapa de densidad
+                                        <span v-if="agarreSeleccionado" class="text-t-accent normal-case">· agarre #{{ agarreSeleccionado }} resaltado</span>
+                                    </h3>
+                                    <div class="flex gap-1.5">
+                                        <button v-for="pl in [['planta','Planta'], ['frontal','Frontal'], ['perfil','Perfil']]"
+                                            :key="pl[0]" @click="cambiarPlanoHeatmap(pl[0])"
+                                            class="px-2.5 py-1 rounded text-xs font-mono transition border"
+                                            :class="planoHeatmap === pl[0]
+                                                ? 'border-t-accent text-t-accent bg-t-accent/10'
+                                                : 'border-t-border text-t-muted hover:border-t-accent hover:text-t-accent'">
+                                            {{ pl[1] }}
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="plotHeatmap" style="width: 100%; height: 280px;"
+                                    class="theme-plot-bg rounded-lg border"></div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                            <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                                <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-4 font-mono">
+                                    Control de Reproducción
+                                </h2>
+                                <div class="flex flex-col gap-4">
+                                    <div class="flex justify-between gap-2">
+                                        <button @click="reiniciar"
+                                            class="theme-btn-secondary px-3 py-2 rounded text-sm w-full">
+                                            Inicio
+                                        </button>
+                                        <button @click="siguientePunto"
+                                            class="theme-accent-bg font-bold px-3 py-2 rounded text-sm w-full">
+                                            Siguiente
+                                        </button>
+                                        <button @click="togglePlay"
+                                            class="text-white font-bold px-3 py-2 rounded text-sm w-full transition"
+                                            :class="isPlaying ? 'bg-red-600 hover:bg-red-500' : 'bg-blue-600 hover:bg-blue-500'">
+                                            {{ isPlaying ? 'Pausa' : 'Reproducir' }}
+                                        </button>
+                                    </div>
+                                    <div>
+                                        <p class="text-[12px] text-t-dimmed uppercase tracking-widest font-mono mb-2">Velocidad</p>
+                                        <div class="flex gap-1.5">
+                                            <button v-for="v in [0.25, 0.5, 1, 2, 4]" :key="v"
+                                                @click="cambiarVelocidad(v)"
+                                                class="flex-1 py-1.5 rounded text-xs font-mono font-bold transition border"
+                                                :class="velocidadReproduccion === v
+                                                    ? 'border-t-accent text-t-accent bg-t-accent/10'
+                                                    : 'border-t-border text-t-muted hover:border-t-accent hover:text-t-accent'">
+                                                {{ v }}x
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div v-if="webglDisponible">
+                                        <p class="text-[12px] text-t-dimmed uppercase tracking-widest font-mono mb-2">Vista de cámara</p>
+                                        <div class="flex gap-1.5">
+                                            <button v-for="c in [['superior','Superior'], ['frontal','Frontal'], ['lateral','Lateral'], ['libre','Libre']]"
+                                                :key="c[0]" @click="vistaCamara(c[0])"
+                                                class="flex-1 py-1.5 rounded text-xs font-mono transition border border-t-border text-t-muted hover:border-t-accent hover:text-t-accent">
+                                                {{ c[1] }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <input type="range" :min="rangoInicio" :max="rangoFin"
+                                            v-model.number="currentIndex" @input="actualizarGrafica3D"
+                                            class="w-full h-2 bg-t-card rounded-lg appearance-none cursor-pointer">
+                                        <div class="flex justify-between text-xs text-t-muted mt-1 font-mono">
+                                            <span>{{ rangoInicio }}</span>
+                                            <span class="font-bold text-t-accent">Frame {{ currentIndex }}</span>
+                                            <span>{{ rangoFin }}</span>
+                                        </div>
+                                    </div>
+                                    <div class="text-center p-2 rounded border text-sm" :class="estadoMano.clase">
+                                        Estado: <strong>{{ estadoMano.texto }}</strong>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                                <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-4 font-mono">
+                                    Aislar Segmento (Frames)
+                                </h2>
+                                <div class="flex items-center gap-2 mb-4">
+                                    <input type="number" v-model.number="inputInicio" @change="validarRango"
+                                        class="theme-input px-2 py-1 rounded w-24 text-center text-sm font-mono border">
+                                    <span class="text-t-dimmed">→</span>
+                                    <input type="number" v-model.number="inputFin" @change="validarRango"
+                                        class="theme-input px-2 py-1 rounded w-24 text-center text-sm font-mono border">
+                                    <button @click="aplicarRango"
+                                        class="theme-btn-secondary px-3 py-1 rounded text-sm ml-auto">
+                                        Aplicar
+                                    </button>
+                                </div>
+                                <p class="text-[12px] text-t-dimmed font-mono">
+                                    Rango total: 0 — {{ maxIndexGlobal }}
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- Trayectoria fantasma: superponer otra sesión de la misma mano -->
+                        <div v-if="webglDisponible" class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl mt-5">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-2 font-mono">
+                                Comparar con otra sesión (trayectoria fantasma)
+                            </h2>
+                            <p class="text-[12px] text-t-dimmed mb-3 font-mono">
+                                Superpone en violeta la trayectoria de otra sesión de la misma mano · el punto fantasma avanza en tiempo proporcional (no absoluto)
+                            </p>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <button v-if="!fantasmaCandidatos.length && !ddFantasma"
+                                    @click="cargarCandidatosFantasma()"
+                                    :disabled="cargandoFantasma"
+                                    class="theme-btn-secondary px-4 py-2 rounded text-sm">
+                                    {{ cargandoFantasma ? 'Buscando sesiones…' : 'Buscar otras sesiones' }}
+                                </button>
+                                <template v-if="fantasmaCandidatos.length && !ddFantasma">
+                                    <select v-model="fantasmaSel"
+                                        class="theme-input px-2 py-2 rounded text-sm font-mono border">
+                                        <option disabled value="">Elige sesión…</option>
+                                        <option v-for="(c, i) in fantasmaCandidatos" :key="i" :value="i">{{ c.label }}</option>
+                                    </select>
+                                    <button @click="seleccionarFantasma()" :disabled="fantasmaSel === ''"
+                                        class="theme-accent-bg font-bold px-4 py-2 rounded text-sm">
+                                        Superponer
+                                    </button>
+                                </template>
+                                <template v-if="ddFantasma">
+                                    <span class="text-sm font-mono px-3 py-1.5 rounded border border-purple-400/50 text-purple-300 bg-purple-400/10">
+                                        {{ fantasmaLabel }}
+                                    </span>
+                                    <button @click="quitarFantasma()"
+                                        class="theme-btn-secondary px-3 py-1.5 rounded text-sm">✕ Quitar</button>
+                                </template>
+                                <span v-if="fantasmaCandidatos.length === 0 && fantasmaBuscado && !ddFantasma"
+                                    class="text-xs text-t-dimmed font-mono">No hay otras sesiones con esta mano.</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Perfil de Velocidad -->
+                    <div v-show="seccionActivaBBT === 'velocidad'">
+                        <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                            <div class="flex items-center justify-between mb-3">
+                                <h2 class="text-t-dimmed text-xs uppercase tracking-widest font-mono">
+                                    Perfil de Velocidad
+                                </h2>
+                                <button @click="cargarVelocidadOtraMano()"
+                                    class="text-xs px-3 py-1 rounded-lg border border-t-border hover:border-t-accent text-t-muted hover:text-t-accent transition font-mono">
+                                    ⟺ Comparar con otra mano
+                                </button>
+                            </div>
+                            <div id="plotVelocidad" style="width: 100%; height: 280px;"
+                                class="theme-plot-bg rounded-lg border"></div>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Fatiga & Agarres -->
+                    <div v-show="seccionActivaBBT === 'fatiga'" class="space-y-5">
+                        <div v-if="dd.indice_fatiga" class="bg-t-panel p-6 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-4 font-mono">Índice de Fatiga</h2>
+                            <div class="flex justify-between items-center mb-3">
+                                <span class="text-t-muted text-xs">Primeros {{ dd.indice_fatiga.n_agarres }} agarres</span>
+                                <span class="font-mono text-sm text-t-green font-bold">{{ dd.indice_fatiga.velocidad_primeros_ms }} m/s</span>
+                            </div>
+                            <div class="flex justify-between items-center mb-3">
+                                <span class="text-t-muted text-xs">Últimos {{ dd.indice_fatiga.n_agarres }} agarres</span>
+                                <span class="font-mono text-sm font-bold"
+                                    :class="dd.indice_fatiga.fatiga_detectada ? 'text-t-red' : 'text-t-green'">
+                                    {{ dd.indice_fatiga.velocidad_ultimos_ms }} m/s
+                                </span>
+                            </div>
+                            <div class="mt-3 pt-3 border-t border-t-border/50 flex justify-between items-center">
+                                <span class="text-xs font-mono" :class="dd.indice_fatiga.fatiga_detectada ? 'text-t-red' : 'text-t-green'">
+                                    {{ dd.indice_fatiga.fatiga_detectada ? 'Fatiga detectada' : 'Sin fatiga significativa' }}
+                                </span>
+                                <span class="font-mono font-bold text-xl"
+                                    :class="dd.indice_fatiga.cambio_pct < 0 ? 'text-t-red' : 'text-t-green'">
+                                    {{ dd.indice_fatiga.cambio_pct > 0 ? '+' : '' }}{{ dd.indice_fatiga.cambio_pct }}%
+                                </span>
+                            </div>
+                        </div>
+                        <!-- El backend devuelve null (no cero) cuando no hay agarres suficientes.
+                             "No hay datos para valorar la fatiga" y "no hay fatiga" son mensajes
+                             opuestos en un panel clinico, asi que se distinguen de forma explicita. -->
+                        <div v-else class="bg-t-panel p-6 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-3 font-mono">Índice de Fatiga</h2>
+                            <div class="severity-medium text-sm p-3 rounded font-mono">
+                                Datos insuficientes para valorar la fatiga
+                            </div>
+                            <p class="text-[12px] text-t-dimmed mt-3 font-mono">
+                                El índice compara los 3 primeros agarres con los 3 últimos, de modo que
+                                requiere al menos 6 agarres segmentados. Esta sesión tiene
+                                {{ dd.grasp_segments ? dd.grasp_segments.length : 0 }}.
+                                <strong>No debe interpretarse como ausencia de fatiga.</strong>
+                            </p>
+                        </div>
+
+                        <div v-if="dd.grasp_segments && dd.grasp_segments.length"
+                            class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-3 font-mono">Resumen por Agarre</h2>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-xs font-mono">
+                                    <thead>
+                                        <tr class="text-t-dimmed border-b border-t-border/50">
+                                            <th class="text-left py-1 pr-2">#</th>
+                                            <th class="text-right py-1 pr-2">Vel. med.</th>
+                                            <th class="text-right py-1 pr-2">Vel. pico</th>
+                                            <th class="text-right py-1">T. reach</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="seg in dd.grasp_segments" :key="seg.num"
+                                            class="border-b border-t-border/20 cursor-pointer hover:bg-t-card/50 transition"
+                                            :class="agarreSeleccionado === seg.num ? 'bg-t-accent/10' : ''"
+                                            @click="seleccionarAgarre(seg.num)">
+                                            <td class="py-1 pr-2 font-bold"
+                                                :class="agarreSeleccionado === seg.num ? 'text-t-accent' : 'text-t-muted'">
+                                                {{ seg.num }}
+                                            </td>
+                                            <td class="text-right py-1 pr-2 text-t-cyan">{{ seg.velocidad_media_ms }}</td>
+                                            <td class="text-right py-1 pr-2 text-t-yellow">{{ seg.velocidad_pico_ms }}</td>
+                                            <td class="text-right py-1 text-t-dimmed">{{ seg.duracion_reach_frames }}f</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p class="text-[12px] text-t-dimmed mt-2 font-mono">
+                                Clic en fila para seleccionar agarre · navega a Reproducción 3D para visualizarlo
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Penalizaciones -->
+                    <div v-show="seccionActivaBBT === 'penalizaciones'">
+                        <div v-if="dd.penalizaciones" class="bg-t-panel p-6 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-5 font-mono">Penalizaciones BBT</h2>
+                            <div class="mb-4">
+                                <div class="flex justify-between items-center mb-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm text-t-muted">Completados</span>
+                                    </div>
+                                    <span class="font-mono font-bold text-2xl"
+                                        :class="dd.penalizaciones.completed > 0 ? 'text-t-green' : 'text-t-red'">
+                                        {{ dd.penalizaciones.completed }}
+                                    </span>
+                                </div>
+                                <p class="text-[12px] text-t-dimmed ml-7">Cubos transportados con éxito</p>
+                            </div>
+                            <div class="mb-4 p-3 rounded-lg"
+                                :class="severidadClase(dd.penalizaciones.no_valid, 50, 100)">
+                                <div class="flex justify-between items-center mb-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm">No Válidos</span>
+                                    </div>
+                                    <span class="font-mono font-bold text-2xl">{{ dd.penalizaciones.no_valid }}</span>
+                                </div>
+                                <p class="text-[12px] opacity-70 ml-7">Agarres sin transporte exitoso</p>
+                                <div class="mt-2 ml-7">
+                                    <div class="w-full bg-black/20 rounded-full h-1.5 overflow-hidden">
+                                        <div class="h-full rounded-full severity-bar"
+                                            :class="severidadBarra(dd.penalizaciones.no_valid, 50, 100)"
+                                            :style="{ width: Math.min((dd.penalizaciones.no_valid / 200) * 100, 100) + '%' }">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="p-3 rounded-lg"
+                                :class="severidadClase(dd.penalizaciones.out_of_zone, 30, 80)">
+                                <div class="flex justify-between items-center mb-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm">Fuera de Zona</span>
+                                    </div>
+                                    <span class="font-mono font-bold text-2xl">{{ dd.penalizaciones.out_of_zone }}</span>
+                                </div>
+                                <p class="text-[12px] opacity-70 ml-7">Mano fuera del área válida</p>
+                                <div class="mt-2 ml-7">
+                                    <div class="w-full bg-black/20 rounded-full h-1.5 overflow-hidden">
+                                        <div class="h-full rounded-full severity-bar"
+                                            :class="severidadBarra(dd.penalizaciones.out_of_zone, 30, 80)"
+                                            :style="{ width: Math.min((dd.penalizaciones.out_of_zone / 150) * 100, 100) + '%' }">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Puntuación & Anomalías -->
+                    <div v-show="seccionActivaBBT === 'puntuacion'">
+                        <div v-if="dd.scores_por_frame && dd.scores_por_frame.length > 0"
+                            class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                            <div class="flex items-center justify-between mb-3">
+                                <h2 class="text-t-dimmed text-xs uppercase tracking-widest font-mono">
+                                    Puntuación por Frame
+                                </h2>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-t-muted text-xs font-mono">Umbral anomalía:</span>
+                                    <input type="number" v-model.number="umbralAnomaliaFrames"
+                                        @change="cambiarUmbralAnomalia()"
+                                        min="10" max="300" step="10"
+                                        class="w-16 text-xs text-center bg-t-card border border-t-border rounded px-1 py-0.5 text-t-text font-mono focus:outline-none focus:border-t-accent" />
+                                    <span class="text-t-muted text-xs font-mono">frames</span>
+                                </div>
+                            </div>
+                            <div id="plotScores" style="width: 100%; height: 220px;"
+                                class="theme-plot-bg rounded-lg border"></div>
+                            <div v-if="anomaliasBBT && anomaliasBBT.length > 0" class="mt-4">
+                                <h3 class="text-t-dimmed text-xs uppercase tracking-widest font-mono mb-2">
+                                    Zonas sin progreso detectadas ({{ anomaliasBBT.length }})
+                                </h3>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-xs font-mono">
+                                        <thead>
+                                            <tr class="text-t-dimmed border-b border-t-border/30">
+                                                <th class="text-left pb-1 pr-3">Zona</th>
+                                                <th class="text-right pb-1 pr-3">Frame inicio</th>
+                                                <th class="text-right pb-1 pr-3">Frame fin</th>
+                                                <th class="text-right pb-1 pr-3">Duración</th>
+                                                <th class="text-right pb-1"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="(a, i) in anomaliasBBT" :key="i"
+                                                class="border-b border-t-border/20 hover:bg-t-card/30 transition">
+                                                <td class="py-1 pr-3 text-red-400 font-bold">A{{ i + 1 }}</td>
+                                                <td class="py-1 pr-3 text-right text-t-muted">{{ a.frame_inicio }}</td>
+                                                <td class="py-1 pr-3 text-right text-t-muted">{{ a.frame_fin }}</td>
+                                                <td class="py-1 pr-3 text-right text-t-text">{{ a.duracion_frames }} fr</td>
+                                                <td class="py-1 text-right">
+                                                    <button @click="verFramesAnomalia(a)"
+                                                        class="text-xs px-2 py-0.5 rounded border border-t-border hover:border-t-accent text-t-muted hover:text-t-accent transition">
+                                                        Ver en 3D
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div v-else-if="anomaliasBBT !== null && anomaliasBBT.length === 0"
+                                class="mt-2 text-xs text-t-dimmed font-mono text-center py-1">
+                                Sin anomalías detectadas con umbral {{ umbralAnomaliaFrames }} frames
+                            </div>
+                        </div>
+                    </div>
+
+                </div><!-- fin página derecha -->
+            </div><!-- fin book-container -->
+
+            <!-- Modal: Comparación de velocidad L vs R -->
+            <!-- v-show (no v-if) al cerrar: el gráfico queda en el DOM para poder capturarlo en el PDF -->
+            <div v-if="ddVelocidadComparar" v-show="velCompModalAbierto"
+                class="fixed inset-0 z-50 flex items-center justify-center p-4"
+                @click.self="velCompModalAbierto = false">
+                <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+                <div class="relative bg-t-panel border border-t-border rounded-2xl shadow-2xl w-full max-w-3xl"
+                    @click.stop>
+                    <div class="flex items-center justify-between p-5 border-b border-t-border/50">
+                        <h2 class="text-sm font-mono uppercase tracking-widest text-t-accent">
+                            Comparación Perfil de Velocidad
+                        </h2>
+                        <button @click="velCompModalAbierto = false"
+                            class="text-t-muted hover:text-red-400 transition text-lg leading-none px-2">✕</button>
+                    </div>
+                    <div class="p-5">
+                        <div class="flex items-center gap-3 mb-4 text-xs font-mono">
+                            <button @click="toggleVelocidadMano(0)"
+                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition"
+                                :class="velCompVisible[0]
+                                    ? 'border-green-400/60 text-t-text bg-green-400/10'
+                                    : 'border-t-border text-t-dimmed opacity-50'"
+                                :title="velCompVisible[0] ? 'Ocultar ' + velCompLabels[0] : 'Mostrar ' + velCompLabels[0]">
+                                <span class="inline-block w-3 h-0.5 bg-green-400 rounded"></span>
+                                {{ velCompLabels[0] }}
+                            </button>
+                            <button @click="toggleVelocidadMano(1)"
+                                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition"
+                                :class="velCompVisible[1]
+                                    ? 'border-cyan-400/60 text-t-text bg-cyan-400/10'
+                                    : 'border-t-border text-t-dimmed opacity-50'"
+                                :title="velCompVisible[1] ? 'Ocultar ' + velCompLabels[1] : 'Mostrar ' + velCompLabels[1]">
+                                <span class="inline-block w-3 h-0.5 bg-cyan-400 rounded" style="border-bottom: 2px dashed"></span>
+                                {{ velCompLabels[1] }}
+                            </button>
+                            <span class="text-t-dimmed">pulsa para ocultar/mostrar cada mano</span>
+                        </div>
+                        <div id="plotVelocidadComparacion" style="width: 100%; height: 400px;"
+                            class="theme-plot-bg rounded-lg border"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ============================================================= -->
+        <!-- VISTA 4b: DASHBOARD FRUITS                                    -->
+        <!-- ============================================================= -->
+        <div v-if="vista === 'dashboard' && dd && dd.game_type?.startsWith('fruits')">
+
+            <!-- Barra de acciones -->
+            <div class="flex justify-between items-center mb-5">
+                <div>
+                    <h2 class="text-lg font-semibold text-t-text">Dashboard Fruits · {{ modoTitulo(dd.game_mode) }}</h2>
+                    <p class="text-xs text-t-dimmed font-mono mt-0.5">{{ dd.date }}</p>
+                </div>
+                <div class="flex gap-2">
+                    <button @click="irA('juegos')" class="theme-btn-secondary py-2 px-4 rounded transition text-sm">← Juegos</button>
+                    <button @click="copiarResumenClinico()"
+                        class="theme-btn-secondary py-2 px-4 rounded transition text-sm"
+                        title="Copia un resumen estructurado de la sesión para pegarlo en la historia clínica">
+                        {{ resumenCopiado ? 'Resumen copiado' : 'Copiar resumen' }}
+                    </button>
+                    <button @click="abrirModalPDF()"
+                        class="theme-accent-bg font-bold py-2 px-5 rounded shadow-lg transition text-sm flex items-center gap-2">
+                        Exportar PDF
+                    </button>
+                </div>
+            </div>
+
+            <!-- Layout libro: índice + contenido -->
+            <div class="book-container">
+
+                <!-- PÁGINA IZQUIERDA: ÍNDICE -->
+                <nav class="book-index">
+                    <div class="book-index-header">
+                        <p class="text-[12px] text-t-dimmed uppercase tracking-widest font-mono mb-1">Índice</p>
+                        <p class="text-xs text-t-muted font-mono">Fruits · {{ modoTitulo(dd.game_mode) }}</p>
+                    </div>
+                    <div class="book-index-items">
+                        <button @click="cambiarSeccionFruits('info')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaFruits === 'info' }">
+                            Información
+                        </button>
+                        <button @click="cambiarSeccionFruits('comparacion')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaFruits === 'comparacion' }">
+                            Comparación de Manos
+                        </button>
+                        <button @click="cambiarSeccionFruits('fatiga')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaFruits === 'fatiga' }">
+                            Secuencia & Fatiga
+                        </button>
+                        <button @click="cambiarSeccionFruits('asimetria')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaFruits === 'asimetria' }">
+                            Asimetría Bilateral
+                        </button>
+                        <button v-if="dd.game_type === 'fruits_race'"
+                            @click="cambiarSeccionFruits('race')"
+                            class="sidebar-nav-item" :class="{ active: seccionActivaFruits === 'race' }">
+                            Mapa de Aciertos
+                        </button>
+                    </div>
+                </nav>
+
+                <!-- PÁGINA DERECHA: CONTENIDO -->
+                <div class="book-content">
+
+                    <!-- Sección: Información (default) -->
+                    <div v-show="seccionActivaFruits === 'info'" class="space-y-5">
+                        <div class="bg-t-panel p-6 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-5 font-mono">Información de Sesión</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-3">
+                                <div class="flex justify-between border-b border-t-border/50 pb-2">
+                                    <span class="text-t-muted text-sm">Paciente</span>
+                                    <span class="font-bold text-t-blue">{{ dd.patient }}</span>
+                                </div>
+                                <div class="flex justify-between border-b border-t-border/50 pb-2">
+                                    <span class="text-t-muted text-sm">Modo</span>
+                                    <span class="font-mono text-t-text text-sm">Fruits · {{ dd.game_mode }}</span>
+                                </div>
+                                <div class="flex justify-between items-center border-b border-t-border/50 pb-2">
+                                    <span class="text-t-muted text-sm">Entorno</span>
+                                    <span class="text-xs font-mono px-2 py-0.5 rounded"
+                                        :class="dd.is_vr ? 'badge-vr' : 'badge-desktop'">
+                                        {{ dd.is_vr ? 'VR' : 'Escritorio' }}
+                                    </span>
+                                </div>
+                                <div class="flex justify-between pb-1">
+                                    <span class="text-t-muted text-sm">Fecha</span>
+                                    <span class="font-mono text-t-muted text-sm">{{ dd.date }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Alerta de asimetría bilateral (umbral clínico 20%) -->
+                        <div v-if="alertaAsimetria"
+                            class="p-4 rounded-xl border shadow-xl flex items-center gap-3"
+                            :class="alertaAsimetria.severidad === 'severa'
+                                ? 'border-red-500/60 bg-red-500/10'
+                                : 'border-yellow-500/60 bg-yellow-500/10'">
+                            <div>
+                                <p class="font-bold text-sm"
+                                    :class="alertaAsimetria.severidad === 'severa' ? 'text-red-400' : 'text-yellow-400'">
+                                    Asimetría bilateral {{ alertaAsimetria.severidad }}: {{ alertaAsimetria.pct }}% en frutas/min
+                                </p>
+                                <p class="text-xs text-t-muted font-mono mt-0.5">
+                                    Mano con menor rendimiento: <strong>{{ alertaAsimetria.manoDebil }}</strong> · detalle en «Asimetría Bilateral»
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- KPI por mano: RIGHT / LEFT / BOTH -->
+                        <template v-if="dd.hands" v-for="handKey in clavesManos" :key="handKey">
+                            <div v-if="dd.hands[handKey]" class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                                <h3 class="text-sm uppercase tracking-widest mb-4 font-mono font-bold"
+                                    :class="manoClaseTexto(handKey)">
+                                    {{ manoTitulo(handKey) }}
+                                </h3>
+                                <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Frutas</div>
+                                        <div class="text-2xl font-bold text-t-text font-mono">{{ dd.hands[handKey].total_fruits }}</div>
+                                    </div>
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Frutas/min</div>
+                                        <div class="text-2xl font-bold text-t-accent font-mono">{{ dd.hands[handKey].metricas.frutas_por_minuto }}</div>
+                                    </div>
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">T. Total</div>
+                                        <div class="text-xl font-bold text-t-text font-mono">{{ dd.hands[handKey].metricas.tiempo_total_s.toFixed(2) }}<span class="text-xs text-t-muted">s</span></div>
+                                    </div>
+                                    <div class="phase-alcance p-3 rounded-lg text-center">
+                                        <div class="text-[11px] text-alcance uppercase tracking-wider">T. Medio</div>
+                                        <div class="text-xl font-bold text-alcance font-mono">{{ dd.hands[handKey].metricas.tiempo_medio_s }}<span class="text-xs">s</span></div>
+                                    </div>
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border col-span-2">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Desv. Típica <span class="normal-case">(consistencia)</span></div>
+                                        <div v-if="dd.hands[handKey].metricas.std_dev_s > 0" class="text-xl font-bold text-t-muted font-mono">
+                                            {{ dd.hands[handKey].metricas.std_dev_s }}<span class="text-xs text-t-dimmed">s</span>
+                                        </div>
+                                        <div v-else class="text-sm text-t-dimmed font-mono italic">pocos datos</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- KPIs extra: Flip — umbrales de rotación -->
+                        <template v-if="dd.game_type === 'fruits_flip'" v-for="handKey in clavesManos" :key="'flip-'+handKey">
+                            <div v-if="dd.hands[handKey]" class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                                <h3 class="text-xs uppercase tracking-widest font-mono font-bold mb-3"
+                                    :class="manoClaseTexto(handKey)">
+                                    {{ manoTitulo(handKey) }} — Umbrales de Rotación
+                                </h3>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Supinación</div>
+                                        <div class="text-xl font-bold text-t-accent font-mono">{{ dd.hands[handKey].supination_threshold?.toFixed(1) }}<span class="text-xs text-t-muted">°</span></div>
+                                    </div>
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Pronación</div>
+                                        <div class="text-xl font-bold text-transporte font-mono">{{ dd.hands[handKey].pronation_threshold?.toFixed(1) }}<span class="text-xs text-t-muted">°</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- KPIs extra: Race — precisión y velocidad -->
+                        <template v-if="dd.game_type === 'fruits_race'" v-for="handKey in clavesManos" :key="'race-'+handKey">
+                            <div v-if="dd.hands[handKey]" class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                                <h3 class="text-xs uppercase tracking-widest font-mono font-bold mb-3"
+                                    :class="manoClaseTexto(handKey)">
+                                    {{ manoTitulo(handKey) }} — Precisión & Velocidad
+                                </h3>
+                                <div class="grid grid-cols-3 gap-3">
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Precisión</div>
+                                        <div class="text-2xl font-bold font-mono"
+                                            :class="dd.hands[handKey].metricas.precision_pct >= 90 ? 'text-t-green' : dd.hands[handKey].metricas.precision_pct >= 70 ? 'text-t-accent' : 'text-red-400'">
+                                            {{ dd.hands[handKey].metricas.precision_pct }}<span class="text-xs text-t-muted">%</span>
+                                        </div>
+                                    </div>
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Falladas</div>
+                                        <div class="text-2xl font-bold text-red-400 font-mono">{{ dd.hands[handKey].failed_fruits }}</div>
+                                    </div>
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Vel. Fruta</div>
+                                        <div class="text-xl font-bold text-t-text font-mono">{{ dd.hands[handKey].fruit_speed?.toFixed(2) }}</div>
+                                    </div>
+                                    <div v-if="dd.hands[handKey].metricas.error_fallo_medio_cm != null"
+                                        class="bg-t-card p-3 rounded-lg text-center border border-t-card-border"
+                                        title="Dismetría: distancia media mano↔fruta en los eventos fallados">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Error Fallo (med)</div>
+                                        <div class="text-xl font-bold text-t-yellow font-mono">{{ dd.hands[handKey].metricas.error_fallo_medio_cm }}<span class="text-xs text-t-muted">cm</span></div>
+                                    </div>
+                                    <div v-if="dd.hands[handKey].metricas.error_fallo_max_cm != null"
+                                        class="bg-t-card p-3 rounded-lg text-center border border-t-card-border"
+                                        title="Peor fallo de la partida (distancia máxima mano↔fruta)">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Error Fallo (máx)</div>
+                                        <div class="text-xl font-bold text-red-400 font-mono">{{ dd.hands[handKey].metricas.error_fallo_max_cm }}<span class="text-xs text-t-muted">cm</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- KPIs extra: Sequence — ciclos y frecuencia -->
+                        <template v-if="dd.game_type === 'fruits_sequence'" v-for="handKey in clavesManos" :key="'seq-'+handKey">
+                            <div v-if="dd.hands[handKey]" class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                                <h3 class="text-xs uppercase tracking-widest font-mono font-bold mb-3"
+                                    :class="manoClaseTexto(handKey)">
+                                    {{ manoTitulo(handKey) }} — Ciclos
+                                </h3>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Frutas/ciclo</div>
+                                        <div class="text-2xl font-bold text-t-accent font-mono">{{ dd.hands[handKey].fruits_by_cycle }}</div>
+                                    </div>
+                                    <div class="bg-t-card p-3 rounded-lg text-center border border-t-card-border">
+                                        <div class="text-[11px] text-t-dimmed uppercase tracking-wider">Frecuencia</div>
+                                        <div class="text-xl font-bold text-t-text font-mono">{{ dd.hands[handKey].fruits_frequency?.toFixed(2) }}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+
+                        <div class="flex justify-end">
+                            <button @click="iniciarComparacion()"
+                                class="theme-accent-bg px-5 py-2.5 rounded-lg text-sm font-mono font-bold shadow-lg hover:opacity-90 transition">
+                                ⟷ Comparar con otra sesión
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Comparación de Manos -->
+                    <div v-show="seccionActivaFruits === 'comparacion'">
+                        <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-2 font-mono">Comparación entre manos</h2>
+                            <p class="text-[12px] text-t-dimmed mb-3 font-mono">
+                                Barras de color: frutas/min (eje izq.) · Barras violeta: tiempo medio por fruta (eje der.)
+                            </p>
+                            <div id="plotFruitsComparacion" style="width:100%; height:320px;"
+                                class="theme-plot-bg rounded-lg border"></div>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Secuencia & Fatiga -->
+                    <div v-show="seccionActivaFruits === 'fatiga'">
+                        <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-2 font-mono">
+                                Secuencia de alcances con tendencia de fatiga
+                            </h2>
+                            <p class="text-[12px] text-t-dimmed mb-3 font-mono">
+                                Línea sólida: tiempo por fruta · Línea discontinua: tendencia (sube = fatiga, baja = mejora)
+                            </p>
+                            <div id="plotFruitsTimes" style="width:100%; height:320px;"
+                                class="theme-plot-bg rounded-lg border"></div>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Asimetría Bilateral -->
+                    <div v-show="seccionActivaFruits === 'asimetria'">
+                        <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-2 font-mono">Asimetría bilateral</h2>
+                            <p class="text-[12px] text-t-dimmed mb-3 font-mono">
+                                + = derecha mejor · − = izquierda mejor · Verde &lt;10% simétrico · Leve &lt;20% · Moderada &lt;40% · Severa ≥40%
+                            </p>
+                            <div id="plotFruitsAsimetria" style="width:100%; height:280px;"
+                                class="theme-plot-bg rounded-lg border"></div>
+                        </div>
+                    </div>
+
+                    <!-- Sección: Mapa de aciertos (solo Race) -->
+                    <div v-show="seccionActivaFruits === 'race'" v-if="dd.game_type === 'fruits_race'">
+                        <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                            <h2 class="text-t-dimmed text-xs uppercase tracking-widest mb-2 font-mono">Mapa espacial de aciertos y fallos</h2>
+                            <p class="text-[12px] text-t-dimmed mb-3 font-mono">
+                                Posición de cada fruta (vista frontal) · Color = mano (azul: derecha · naranja: izquierda) · ● atrapada · ✕ fallada · Las zonas con ✕ agrupadas indican regiones de alcance difícil
+                            </p>
+                            <div id="plotRaceScatter" style="width:100%; height:380px;"
+                                class="theme-plot-bg rounded-lg border"></div>
+                        </div>
+                    </div>
+
+                </div><!-- fin página derecha -->
+            </div><!-- fin book-container -->
+        </div>
+
+
+        <!-- ============================================================= -->
+        <!-- VISTA 6: COMPARACIÓN DE DOS SESIONES FRUITS                   -->
+        <!-- ============================================================= -->
+        <div v-if="vista === 'comparar' && dd && ddComparar">
+
+            <!-- Cabecera -->
+            <div class="mb-6">
+                <h2 class="text-lg font-semibold text-t-text mb-1">Comparación de sesiones</h2>
+                <p class="text-xs text-t-dimmed font-mono">{{ nombrePaciente(pacienteSeleccionado) }}</p>
+            </div>
+
+            <!-- Etiquetas sesión A / sesión B -->
+            <div class="grid grid-cols-4 gap-3 mb-4 text-center text-xs font-mono uppercase tracking-widest">
+                <div class="text-t-dimmed">Métrica</div>
+                <div class="text-t-blue font-bold">Sesión A · {{ ddComparar.date?.slice(0,10) }}</div>
+                <div class="text-t-accent font-bold">Sesión B · {{ dd.date?.slice(0,10) }}</div>
+                <div class="text-t-dimmed">Δ B vs A</div>
+            </div>
+
+            <!-- Por mano -->
+            <template v-for="handKey in clavesManos" :key="handKey">
+                <div v-if="ddComparar.hands?.[handKey] && dd.hands?.[handKey]"
+                    class="bg-t-panel rounded-xl border border-t-border shadow-xl p-5 mb-4">
+
+                    <h3 class="text-xs uppercase tracking-widest font-mono font-bold mb-4"
+                        :class="manoClaseTexto(handKey)">
+                        {{ manoTitulo(handKey) }}
+                    </h3>
+
+                    <div v-for="m in [
+                        { key:'frutas_por_minuto', label:'Frutas/min',     unit:'',  mejor:true  },
+                        { key:'tiempo_medio_s',    label:'T. Medio',       unit:'s', mejor:false },
+                        { key:'std_dev_s',         label:'Desv. Típica',   unit:'s', mejor:false },
+                        { key:'tiempo_min_s',      label:'T. Mínimo',      unit:'s', mejor:false },
+                        { key:'tiempo_max_s',      label:'T. Máximo',      unit:'s', mejor:false },
+                    ]" :key="m.key"
+                    class="grid grid-cols-4 gap-3 py-2 border-b border-t-border/30 text-sm font-mono items-center">
+
+                        <div class="text-t-muted text-xs">{{ m.label }}</div>
+
+                        <div class="text-center text-t-blue">
+                            {{ ddComparar.hands[handKey].metricas[m.key] }}
+                            <span class="text-xs text-t-dimmed">{{ m.unit }}</span>
+                        </div>
+
+                        <div class="text-center text-t-accent">
+                            {{ dd.hands[handKey].metricas[m.key] }}
+                            <span class="text-xs text-t-dimmed">{{ m.unit }}</span>
+                        </div>
+
+                        <div class="text-center font-bold"
+                            :class="deltaFruits(handKey, m.key, m.mejor) === null ? 'text-t-dimmed' :
+                                    deltaFruits(handKey, m.key, m.mejor).mejora ? 'text-t-green' :
+                                    deltaFruits(handKey, m.key, m.mejor).pct === 0 ? 'text-t-dimmed' : 'text-t-red'">
+                            <!-- flecha = dirección del valor (sube/baja); el color ya indica mejora/empeora -->
+                            <template v-if="deltaFruits(handKey, m.key, m.mejor) !== null && deltaFruits(handKey, m.key, m.mejor).pct !== 0">
+                                {{ deltaFruits(handKey, m.key, m.mejor).pct > 0 ? '↑' : '↓' }}
+                                {{ Math.abs(deltaFruits(handKey, m.key, m.mejor).pct) }}%
+                            </template>
+                            <span v-else class="text-t-dimmed font-normal">—</span>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <div class="flex gap-3 mt-2">
+                <button @click="irA('sesiones')" class="theme-btn-secondary px-4 py-2 rounded-lg text-sm font-mono">
+                    ← Volver a sesiones
+                </button>
+                <button @click="iniciarComparacion()" class="theme-accent-bg px-4 py-2 rounded-lg text-sm font-mono font-bold">
+                    ⟷ Nueva comparación
+                </button>
+            </div>
+        </div>
+
+
+        <!-- ============================================================= -->
+        <!-- VISTA 5b: EVOLUCIÓN TEMPORAL FRUITS                           -->
+        <!-- ============================================================= -->
+        <div v-if="vista === 'evolucion_fruits' && pacienteSeleccionado">
+
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-lg font-semibold text-t-text">
+                        Evolución de
+                        <span class="text-t-blue">{{ nombrePaciente(pacienteSeleccionado) }}</span>
+                    </h2>
+                    <p class="text-xs text-t-dimmed mt-1 font-mono">
+                        Fruits — modo Alcance · {{ evolucionFruits?.sessions?.length || 0 }} sesión(es) con datos
+                    </p>
+                </div>
+                <button @click="irA('sesiones')"
+                    class="theme-btn-secondary py-2 px-5 rounded transition text-sm">
+                    ← Sesiones
+                </button>
+            </div>
+
+            <!-- Toggles de métrica -->
+            <div class="flex gap-2 mb-5 flex-wrap">
+                <button v-for="m in [
+                        { key: 'frutas_por_minuto', label: 'Frutas/min'   },
+                        { key: 'total_fruits',      label: 'Total frutas' },
+                        { key: 'total_time',        label: 'Tiempo total' }
+                    ]" :key="m.key"
+                    @click="cambiarMetricaFruitsEvolucion(m.key)"
+                    class="py-2 px-4 rounded text-sm font-mono transition"
+                    :class="evolucionFruitsMetrica === m.key ? 'theme-accent-bg font-bold' : 'theme-btn-secondary'">
+                    {{ m.label }}
+                </button>
+            </div>
+
+            <!-- Gráfico -->
+            <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                <h3 class="text-t-dimmed text-xs uppercase tracking-widest mb-3 font-mono">
+                    Derecha · Izquierda · Ambas por sesión
+                </h3>
+                <div v-if="evolucionFruits && evolucionFruits.sessions && evolucionFruits.sessions.length">
+                    <div id="plotFruitsEvolucion" style="width:100%;height:420px;"
+                        class="theme-plot-bg rounded-lg border"></div>
+                </div>
+                <div v-else class="flex flex-col items-center justify-center h-48 text-t-dimmed">
+                    <p class="text-xl font-light">Sin datos de evolución</p>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ============================================================= -->
+        <!-- VISTA 5: EVOLUCIÓN TEMPORAL BBT                             -->
+        <!-- ============================================================= -->
+        <div v-if="vista === 'evolucion' && pacienteSeleccionado">
+
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-lg font-semibold text-t-text">
+                        Evolución de
+                        <span class="text-t-blue">{{ nombrePaciente(pacienteSeleccionado) }}</span>
+                    </h2>
+                    <p class="text-xs text-t-dimmed mt-1 font-mono">
+                        BBT · {{ evolucion?.sessions?.length || 0 }} sesión(es) con datos históricos
+                    </p>
+                </div>
+                <div class="flex gap-2">
+                    <button @click="abrirModalPDF()"
+                        class="theme-accent-bg font-bold py-2 px-5 rounded shadow-lg transition text-sm flex items-center gap-2">
+                        Exportar PDF
+                    </button>
+                    <button @click="irA('sesiones')"
+                        class="theme-btn-secondary py-2 px-5 rounded transition text-sm">
+                        ← Sesiones
+                    </button>
+                </div>
+            </div>
+
+            <!-- Toggles de métrica -->
+            <div class="flex gap-2 mb-5 flex-wrap">
+                <button v-for="m in [
+                        { key: 'completed',   label: 'Completados'   },
+                        { key: 'no_valid',    label: 'Errores'       },
+                        { key: 'out_of_zone', label: 'Fuera de zona' }
+                    ]" :key="m.key"
+                    @click="cambiarMetricaEvolucion(m.key)"
+                    class="py-2 px-4 rounded text-sm font-mono transition"
+                    :class="evolucionMetrica === m.key ? 'theme-accent-bg font-bold' : 'theme-btn-secondary'">
+                    {{ m.label }}
+                </button>
+            </div>
+
+            <!-- Gráfico -->
+            <div class="bg-t-panel p-5 rounded-xl border border-t-border shadow-xl">
+                <h3 class="text-t-dimmed text-xs uppercase tracking-widest mb-3 font-mono">
+                    Izquierda vs Derecha por sesión
+                </h3>
+                <div v-if="evolucion && evolucion.sessions && evolucion.sessions.length">
+                    <div id="plotEvolucion" style="width:100%;height:420px;"
+                        class="theme-plot-bg rounded-lg border"></div>
+                </div>
+                <div v-else class="flex flex-col items-center justify-center h-48 text-t-dimmed">
+                    <p class="text-xl font-light">Sin datos históricos para este paciente</p>
+                    <p class="text-xs mt-2 font-mono">Comprueba que BBT_Historic_.csv contiene datos</p>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- ============================================================= -->
+        <!-- VISTA 7: COMPARACIÓN DE MANOS BBT (Derecha vs Izquierda)   -->
+        <!-- ============================================================= -->
+        <div v-if="vista === 'comparar_manos' && ddComparacionManos">
+
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h2 class="text-lg font-semibold text-t-text">Comparación de Manos — BBT</h2>
+                    <p class="text-xs text-t-dimmed mt-1 font-mono">{{ nombrePaciente(pacienteSeleccionado) }}</p>
+                </div>
+                <div class="flex gap-2">
+                    <button @click="abrirModalPDF()"
+                        class="theme-accent-bg font-bold py-2 px-5 rounded shadow-lg transition text-sm flex items-center gap-2">
+                        Exportar PDF
+                    </button>
+                    <button @click="irA('juegos')" class="theme-btn-secondary py-2 px-5 rounded transition text-sm">
+                        ← Juegos
+                    </button>
+                </div>
+            </div>
+
+            <!-- Cabecera columnas -->
+            <div class="grid grid-cols-4 gap-3 mb-3 text-xs font-mono uppercase tracking-widest px-5">
+                <div class="text-t-dimmed">Métrica</div>
+                <div class="text-t-green font-bold text-center">→ Derecha</div>
+                <div class="text-t-cyan font-bold text-center">← Izquierda</div>
+                <div class="text-t-dimmed text-center">Gráfico</div>
+            </div>
+
+            <!-- Tabla de métricas biomecánicas -->
+            <div class="bg-t-panel rounded-xl border border-t-border shadow-xl p-5 mb-5">
+                <template v-for="m in [
+                        { key: 'distancia_m',          label: 'Trayectoria',    unit: 'm'   },
+                        { key: 'velocidad_media_ms',    label: 'Vel. Media',     unit: 'm/s' },
+                        { key: 'velocidad_pico_ms',     label: 'Vel. Pico',      unit: 'm/s' },
+                        { key: 'tiempo_alcance_s',      label: 'T. Alcance',     unit: 's'   },
+                        { key: 'tiempo_transporte_s',   label: 'T. Transporte',  unit: 's'   },
+                        { key: 'num_transiciones',      label: 'Transiciones',   unit: ''    },
+                    ]" :key="m.key">
+
+                    <div class="grid grid-cols-4 gap-3 py-2 border-b border-t-border/30 text-sm font-mono items-center">
+                        <div class="text-t-muted text-xs">{{ m.label }}</div>
+                        <div class="text-center text-t-green font-bold">
+                            {{ ddComparacionManos.derecha?.metricas?.[m.key] ?? '—' }}
+                            <span class="text-xs text-t-dimmed font-normal">{{ m.unit }}</span>
+                        </div>
+                        <div class="text-center text-t-cyan font-bold">
+                            {{ ddComparacionManos.izquierda?.metricas?.[m.key] ?? '—' }}
+                            <span class="text-xs text-t-dimmed font-normal">{{ m.unit }}</span>
+                        </div>
+                        <div class="text-center">
+                            <button @click="toggleGraficoComparacion(m.key, m.label, m.unit)"
+                                class="text-[12px] font-mono px-2 py-1 rounded transition"
+                                :class="graficosVisibles[m.key] ? 'theme-accent-bg' : 'theme-btn-secondary'">
+                                {{ graficosVisibles[m.key] ? 'Ocultar' : 'Ver' }}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div v-if="graficosVisibles[m.key]" class="py-3 border-b border-t-border/30">
+                        <div :id="'plot_cmp_' + m.key" style="width:100%; height:220px;"
+                            class="theme-plot-bg rounded-lg border"></div>
+                    </div>
+
+                </template>
+
+                <!-- Eficiencia (sin botón de gráfico) -->
+                <div class="grid grid-cols-4 gap-3 py-2 border-b border-t-border/30 text-sm font-mono items-center">
+                    <div class="text-t-muted text-xs">Eficiencia</div>
+                    <div class="text-center text-t-green font-bold">
+                        {{ ddComparacionManos.derecha?.metricas?.ratio_eficiencia_pct ?? '—' }}
+                        <span class="text-xs text-t-dimmed font-normal">%</span>
+                    </div>
+                    <div class="text-center text-t-cyan font-bold">
+                        {{ ddComparacionManos.izquierda?.metricas?.ratio_eficiencia_pct ?? '—' }}
+                        <span class="text-xs text-t-dimmed font-normal">%</span>
+                    </div>
+                    <div></div>
+                </div>
+
+                <!-- Penalizaciones BBT -->
+                <div v-if="ddComparacionManos.derecha?.penalizaciones || ddComparacionManos.izquierda?.penalizaciones"
+                    class="mt-4 pt-3 border-t border-t-border/40">
+                    <p class="text-xs font-mono text-t-dimmed uppercase tracking-widest mb-3">Penalizaciones</p>
+
+                    <div v-for="pen in [
+                            { key: 'completed',   label: 'Completados' },
+                            { key: 'no_valid',    label: 'No Válidos'  },
+                            { key: 'out_of_zone', label: 'Fuera Zona'  },
+                        ]" :key="pen.key"
+                        class="grid grid-cols-3 gap-3 py-1.5 text-sm font-mono items-center border-b border-t-border/20">
+                        <div class="text-t-muted text-xs">{{ pen.label }}</div>
+                        <div class="text-center text-t-green font-bold">{{ ddComparacionManos.derecha?.penalizaciones?.[pen.key] ?? '—' }}</div>
+                        <div class="text-center text-t-cyan font-bold">{{ ddComparacionManos.izquierda?.penalizaciones?.[pen.key] ?? '—' }}</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Cargando (genérico) -->
+        <div v-if="vista === 'dashboard' && !dd"
+            class="flex flex-col items-center justify-center h-64 text-t-dimmed mt-10">
+            <div class="text-5xl mb-4 opacity-30">⟁</div>
+            <p class="text-xl font-light">Cargando datos de sesión...</p>
+        </div>
+
+        <!-- ============================================================= -->
+        <!-- MODAL: EXPORTAR PDF                                           -->
+        <!-- ============================================================= -->
+        <transition name="modal-fade">
+            <div v-if="pdfModalAbierto"
+                class="fixed inset-0 z-50 flex items-center justify-center p-4"
+                style="background: rgba(0,0,0,0.75); backdrop-filter: blur(4px);"
+                @click.self="pdfModalAbierto = false">
+
+                <div class="bg-t-panel border border-t-border rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden"
+                    style="max-height: 88vh;">
+
+                    <!-- Cabecera del modal -->
+                    <div class="flex justify-between items-center px-6 py-4 border-b border-t-border shrink-0">
+                        <div>
+                            <h3 class="text-t-accent font-bold text-lg font-mono">Generar Informe PDF</h3>
+                            <p class="text-xs text-t-dimmed mt-0.5">Selecciona y ordena las secciones a incluir</p>
+                        </div>
+                        <button @click="pdfModalAbierto = false"
+                            class="text-t-dimmed hover:text-t-text transition text-2xl leading-none w-8 h-8 flex items-center justify-center rounded hover:bg-t-card">
+                            ✕
+                        </button>
+                    </div>
+
+                    <!-- Cuerpo del modal -->
+                    <div class="flex flex-1 overflow-hidden min-h-0">
+
+                        <!-- Columna izquierda: checklist + orden -->
+                        <div class="flex-1 overflow-y-auto px-6 py-4 border-r border-t-border">
+                            <p class="text-xs font-mono text-t-dimmed uppercase tracking-widest mb-3">Secciones disponibles</p>
+
+                            <div v-for="(sec, idx) in pdfSecciones" :key="sec.id" class="mb-2">
+                                <div class="flex items-center gap-3 p-3 rounded-lg transition-colors"
+                                    :class="sec.disponible
+                                        ? 'bg-t-card cursor-pointer hover:bg-t-card/60'
+                                        : 'opacity-40 cursor-not-allowed'">
+
+                                    <!-- Checkbox -->
+                                    <input type="checkbox"
+                                        :id="'pdf_sec_' + sec.id"
+                                        v-model="sec.checked"
+                                        :disabled="!sec.disponible"
+                                        class="w-4 h-4 shrink-0 cursor-pointer"
+                                        style="accent-color: var(--color-accent)">
+
+                                    <!-- Icono + Label -->
+                                    <label :for="'pdf_sec_' + sec.id"
+                                        class="flex-1 flex items-center gap-2 text-sm select-none"
+                                        :class="sec.checked && sec.disponible ? 'text-t-text font-semibold cursor-pointer' : 'text-t-muted'">
+                                        <span>{{ sec.label }}</span>
+                                        <span v-if="!sec.disponible"
+                                            class="text-[12px] font-mono text-t-dimmed ml-auto bg-t-panel px-1.5 py-0.5 rounded">
+                                            sin datos
+                                        </span>
+                                    </label>
+
+                                    <!-- Controles de orden (solo si está activada) -->
+                                    <div v-if="sec.checked && sec.disponible" class="flex flex-col gap-0.5 shrink-0">
+                                        <button @click.stop="moverSeccionPDF(idx, -1)"
+                                            :disabled="idx === 0"
+                                            class="text-t-dimmed hover:text-t-accent disabled:opacity-20 text-xs leading-none w-5 h-4 flex items-center justify-center transition">
+                                            ▲
+                                        </button>
+                                        <button @click.stop="moverSeccionPDF(idx, 1)"
+                                            :disabled="idx === pdfSecciones.length - 1"
+                                            class="text-t-dimmed hover:text-t-accent disabled:opacity-20 text-xs leading-none w-5 h-4 flex items-center justify-center transition">
+                                            ▼
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Columna derecha: preview + notas -->
+                        <div class="w-60 flex flex-col px-5 py-4 shrink-0 overflow-y-auto">
+
+                            <!-- Preview orden -->
+                            <div class="mb-5">
+                                <p class="text-xs font-mono text-t-dimmed uppercase tracking-widest mb-2">Vista previa</p>
+                                <div class="bg-t-card rounded-lg border border-t-border p-3 min-h-20">
+                                    <div v-if="!pdfSecciones.some(s => s.checked && s.disponible)"
+                                        class="text-t-dimmed text-xs text-center py-3">
+                                        Sin secciones seleccionadas
+                                    </div>
+                                    <template v-else>
+                                        <div class="text-[12px] font-mono text-t-dimmed mb-2 uppercase">Portada + secciones:</div>
+                                        <div v-for="(s, i) in pdfSecciones.filter(s => s.checked && s.disponible)"
+                                            :key="s.id"
+                                            class="flex items-center gap-1.5 text-xs py-0.5">
+                                            <span class="text-t-dimmed font-mono w-4 shrink-0 text-right">{{ i + 1 }}.</span>
+                                            <span class="text-t-text truncate">{{ s.label }}</span>
+                                        </div>
+                                    </template>
+                                </div>
+                                <p class="text-[12px] text-t-dimmed mt-1.5 font-mono">
+                                    ~{{ Math.max(1, pdfSecciones.filter(s => s.checked && s.disponible).length + 1) }} página(s) estimada(s)
+                                </p>
+                            </div>
+
+                            <!-- Notas clínicas -->
+                            <div class="flex-1 flex flex-col min-h-0">
+                                <p class="text-xs font-mono text-t-dimmed uppercase tracking-widest mb-2">Notas clínicas</p>
+                                <textarea
+                                    v-model="pdfNotas"
+                                    placeholder="Observaciones del médico para incluir al final del informe..."
+                                    class="flex-1 bg-t-card border border-t-border rounded-lg p-2 text-xs text-t-text resize-none focus:outline-none focus:border-t-accent min-h-28 font-mono"
+                                ></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Pie del modal -->
+                    <div class="flex justify-between items-center px-6 py-4 border-t border-t-border shrink-0">
+                        <button @click="pdfModalAbierto = false"
+                            class="theme-btn-secondary py-2 px-5 rounded text-sm">
+                            Cancelar
+                        </button>
+                        <button @click="generarPDF()"
+                            :disabled="pdfGenerando || !pdfSecciones.some(s => s.checked && s.disponible)"
+                            class="theme-accent-bg font-bold py-2 px-6 rounded shadow-lg transition text-sm
+                                   disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                            <span v-if="pdfGenerando" class="flex items-center gap-2">
+                                <span class="inline-block w-3 h-3 border-2 border-t-transparent border-black rounded-full animate-spin"></span>
+                                Generando...
+                            </span>
+                            <span v-else>Generar PDF</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </transition>
+
+    </div>
+
+    <!-- Scripts (Vue 3.4.38, build de producción auto-alojado) -->
+    <script src="vendor/vue.global.prod.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/app.js"></script>
+
+</body>
+
+</html>

@@ -1,0 +1,30 @@
+# Credenciales
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+venv/
+.venv/
+
+# Entornos y editores
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Artefactos de LaTeX (por si se versiona la memoria)
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.run.xml
+*.toc
+*.synctex.gz

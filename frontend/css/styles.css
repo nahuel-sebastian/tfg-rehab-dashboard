@@ -1,0 +1,671 @@
+/* =============================================================================
+   FlexPendant HMI - Dashboard de Rehabilitación Robótica
+   Sistema de temas: Oscuro (industrial) / Claro (clínico UC3M)
+   ============================================================================= */
+
+
+/* --- Tipografías (auto-alojadas: funcionan sin internet en la estación clínica) --- */
+@import url('fonts.css');
+
+body {
+    font-family: 'Inter', sans-serif;
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+.font-mono {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+
+/* =============================================================================
+   VARIABLES DE TEMA
+   ============================================================================= */
+
+/* --- TEMA OSCURO (por defecto) --- */
+:root {
+    --color-sidebar-active-bg: rgba(255, 158, 0, 0.07);
+    --color-bg: #1e1e1e;
+    --color-panel: #2d2d30;
+    --color-panel-hover: #3a3a3d;
+    --color-border: #374151;
+    --color-border-light: rgba(55, 65, 81, 0.5);
+    --color-text: #ffffff;
+    --color-text-muted: #9ca3af;
+    --color-text-dimmed: #9aa3af;   /* subido de #6b7280: WCAG AA sobre #1e1e1e */
+    --color-accent: #ff9e00;
+    --color-accent-hover: #ea8c00;
+    --color-accent-text: #000000;
+
+    /* Gráficos */
+    --color-plot-bg: rgba(0, 0, 0, 0.4);
+    --color-plot-grid: #333333;
+    --color-plot-zero: #555555;
+    --color-plot-font: #999999;
+    --color-plot-line: rgba(255, 255, 255, 0.5);
+
+    /* KPI cards */
+    --color-card-bg: rgba(31, 41, 55, 0.8);
+    --color-card-border: #4b5563;
+
+    /* Tabla */
+    --color-table-header-bg: transparent;
+    --color-table-row-hover: #3a3a3d;
+
+    /* Inputs */
+    --color-input-bg: #1f2937;
+    --color-input-border: #4b5563;
+
+    /* Slider thumb */
+    --color-slider-thumb-border: #1e1e1e;
+
+    /* Botones secundarios */
+    --color-btn-secondary: #374151;
+    --color-btn-secondary-hover: #4b5563;
+    --color-btn-secondary-text: #ffffff;
+
+    /* Colores semánticos de texto (neon para oscuro) */
+    --color-sem-blue:   #60a5fa;
+    --color-sem-cyan:   #22d3ee;
+    --color-sem-green:  #4ade80;
+    --color-sem-yellow: #facc15;
+    --color-sem-purple: #c084fc;
+    --color-sem-orange: #fb923c;
+    --color-sem-red:    #f87171;
+    --color-alcance:    #4facfe;
+}
+
+
+/* --- TEMA CLARO (clínico UC3M) --- */
+[data-theme="light"] {
+    --color-sidebar-active-bg: rgba(0, 40, 85, 0.05);
+    --color-bg: #f0f4f8;
+    --color-panel: #ffffff;
+    --color-panel-hover: #e8edf2;
+    --color-border: #cbd5e1;
+    --color-border-light: rgba(203, 213, 225, 0.5);
+    --color-text: #1e293b;
+    --color-text-muted: #64748b;
+    --color-text-dimmed: #6b7280;   /* subido de #94a3b8: WCAG AA sobre fondo claro */
+    --color-accent: #002855;
+    --color-accent-hover: #003a7a;
+    --color-accent-text: #ffffff;
+
+    /* Gráficos */
+    --color-plot-bg: rgba(241, 245, 249, 0.6);
+    --color-plot-grid: #cbd5e1;
+    --color-plot-zero: #94a3b8;
+    --color-plot-font: #475569;
+    --color-plot-line: rgba(30, 41, 59, 0.5);
+
+    /* KPI cards */
+    --color-card-bg: #f1f5f9;
+    --color-card-border: #cbd5e1;
+
+    /* Tabla */
+    --color-table-header-bg: #f8fafc;
+    --color-table-row-hover: #e8edf2;
+
+    /* Inputs */
+    --color-input-bg: #f1f5f9;
+    --color-input-border: #cbd5e1;
+
+    /* Slider thumb */
+    --color-slider-thumb-border: #ffffff;
+
+    /* Botones secundarios */
+    --color-btn-secondary: #e2e8f0;
+    --color-btn-secondary-hover: #cbd5e1;
+    --color-btn-secondary-text: #1e293b;
+
+    /* Colores semánticos de texto (oscuros para modo claro) */
+    --color-sem-blue:   #1d4ed8;
+    --color-sem-cyan:   #0e7490;
+    --color-sem-green:  #15803d;
+    --color-sem-yellow: #b45309;
+    --color-sem-purple: #7e22ce;
+    --color-sem-orange: #c2410c;
+    --color-sem-red:    #dc2626;
+    --color-alcance:    #1d4ed8;
+}
+
+
+/* =============================================================================
+   CLASES DE TEMA (usadas en el HTML con :class bindings)
+   ============================================================================= */
+
+/* Fondo principal */
+.theme-bg {
+    background-color: var(--color-bg);
+}
+
+/* Panel / tarjeta */
+.theme-panel {
+    background-color: var(--color-panel);
+    border-color: var(--color-border);
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.theme-panel:hover {
+    border-color: var(--color-accent);
+}
+
+/* Texto */
+.theme-text {
+    color: var(--color-text);
+}
+
+.theme-text-muted {
+    color: var(--color-text-muted);
+}
+
+.theme-text-dimmed {
+    color: var(--color-text-dimmed);
+}
+
+/* Acento */
+.theme-accent {
+    color: var(--color-accent);
+}
+
+.theme-accent-bg {
+    background-color: var(--color-accent);
+    color: var(--color-accent-text);
+}
+
+.theme-accent-bg:hover {
+    background-color: var(--color-accent-hover);
+}
+
+/* Bordes */
+.theme-border {
+    border-color: var(--color-border);
+}
+
+.theme-border-light {
+    border-color: var(--color-border-light);
+}
+
+/* Cards de KPI */
+.theme-card {
+    background-color: var(--color-card-bg);
+    border-color: var(--color-card-border);
+}
+
+/* Inputs */
+.theme-input {
+    background-color: var(--color-input-bg);
+    border-color: var(--color-input-border);
+    color: var(--color-text);
+}
+
+/* Botones secundarios */
+.theme-btn-secondary {
+    background-color: var(--color-btn-secondary);
+    color: var(--color-btn-secondary-text);
+    transition: background-color 0.15s ease;
+}
+
+.theme-btn-secondary:hover {
+    background-color: var(--color-btn-secondary-hover);
+}
+
+/* Fondo de gráficos */
+.theme-plot-bg {
+    background-color: var(--color-plot-bg);
+    border-color: var(--color-border);
+}
+
+
+/* =============================================================================
+   COMPONENTES ESPECÍFICOS
+   ============================================================================= */
+
+/* --- Slider personalizado --- */
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    height: 16px;
+    width: 16px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    cursor: pointer;
+    border: 2px solid var(--color-slider-thumb-border);
+}
+
+input[type="range"]::-moz-range-thumb {
+    height: 16px;
+    width: 16px;
+    border-radius: 50%;
+    background: var(--color-accent);
+    cursor: pointer;
+    border: 2px solid var(--color-slider-thumb-border);
+}
+
+/* --- Animación pulse (badge VR) --- */
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.3); }
+}
+
+.pulse-dot {
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+
+/* --- Barras de severidad --- */
+.severity-bar {
+    transition: width 0.6s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+/* --- Hover para filas de tabla --- */
+.row-hover {
+    transition: background-color 0.15s ease;
+}
+
+.row-hover:hover {
+    background-color: var(--color-table-row-hover);
+}
+
+/* =============================================================================
+   CLASES SEMÁNTICAS CON SOPORTE DE TEMA
+   Sustituyen a las clases Tailwind con opacidad (bg-*-900/30) que se vuelven
+   invisibles en modo claro.
+   ============================================================================= */
+
+/* --- Badges de modalidad --- */
+.badge-vr {
+    background-color: rgba(88, 28, 135, 0.35);
+    border: 1px solid rgba(168, 85, 247, 0.55);
+    color: #d8b4fe;
+}
+[data-theme="light"] .badge-vr {
+    background-color: #ede9fe;
+    border-color: #7c3aed;
+    color: #5b21b6;
+}
+
+.badge-desktop {
+    background-color: rgba(30, 58, 138, 0.3);
+    border: 1px solid rgba(96, 165, 250, 0.45);
+    color: #93c5fd;
+}
+[data-theme="light"] .badge-desktop {
+    background-color: #dbeafe;
+    border-color: #2563eb;
+    color: #1d4ed8;
+}
+
+.badge-green {
+    background-color: rgba(20, 83, 45, 0.35);
+    border: 1px solid rgba(74, 222, 128, 0.5);
+    color: #86efac;
+}
+[data-theme="light"] .badge-green {
+    background-color: #dcfce7;
+    border-color: #16a34a;
+    color: #15803d;
+}
+
+.badge-neutral {
+    background-color: var(--color-card-bg);
+    border: 1px solid var(--color-card-border);
+    color: var(--color-text-muted);
+}
+
+/* --- Badge VR en el header --- */
+.badge-vr-header {
+    background-color: rgba(88, 28, 135, 0.4);
+    border: 1px solid rgba(168, 85, 247, 1);
+    color: #d8b4fe;
+}
+[data-theme="light"] .badge-vr-header {
+    background-color: #ede9fe;
+    border-color: #7c3aed;
+    color: #5b21b6;
+}
+
+/* --- Fases BBT (alcance / transporte) --- */
+.phase-alcance {
+    background-color: rgba(30, 58, 138, 0.2);
+    border: 1px solid rgba(96, 165, 250, 0.5);
+}
+[data-theme="light"] .phase-alcance {
+    background-color: #dbeafe;
+    border-color: #3b82f6;
+}
+
+.phase-transporte {
+    background-color: rgba(124, 45, 18, 0.2);
+    border: 1px solid rgba(251, 146, 60, 0.5);
+}
+[data-theme="light"] .phase-transporte {
+    background-color: #ffedd5;
+    border-color: #f97316;
+}
+
+/* --- Severidad (penalizaciones / indicadores) --- */
+.severity-high {
+    background-color: rgba(127, 29, 29, 0.3);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
+}
+[data-theme="light"] .severity-high {
+    background-color: #fee2e2;
+    border-color: #dc2626;
+    color: #991b1b;
+}
+
+.severity-medium {
+    background-color: rgba(113, 63, 18, 0.2);
+    border: 1px solid rgba(234, 179, 8, 0.35);
+    color: #fde68a;
+}
+[data-theme="light"] .severity-medium {
+    background-color: #fef3c7;
+    border-color: #d97706;
+    color: #92400e;
+}
+
+.severity-low {
+    background-color: rgba(20, 83, 45, 0.2);
+    border: 1px solid rgba(74, 222, 128, 0.35);
+    color: #86efac;
+}
+[data-theme="light"] .severity-low {
+    background-color: #dcfce7;
+    border-color: #16a34a;
+    color: #14532d;
+}
+
+/* --- Info box verde (posiciones de agarre) --- */
+.info-green {
+    background-color: rgba(20, 83, 45, 0.15);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    color: #86efac;
+}
+[data-theme="light"] .info-green {
+    background-color: #dcfce7;
+    border-color: #16a34a;
+    color: #14532d;
+}
+
+/* --- KPI card colored: frutas alcanzadas --- */
+.kpi-green {
+    background-color: rgba(20, 83, 45, 0.2);
+    border: 1px solid rgba(74, 222, 128, 0.4);
+}
+[data-theme="light"] .kpi-green {
+    background-color: #dcfce7;
+    border-color: #16a34a;
+}
+
+/* --- Marcador de posición de agarre (estrella/cruz) --- */
+.marker-agarre {
+    background: var(--color-sem-green);
+    clip-path: polygon(50% 0%,55% 45%,100% 50%,55% 55%,50% 100%,45% 55%,0% 50%,45% 45%);
+}
+
+/* --- Toggle de tema (botón sol/luna) --- */
+.theme-toggle {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border: 1px solid var(--color-border);
+    background-color: var(--color-panel);
+    color: var(--color-accent);
+    font-size: 18px;
+    transition: all 0.3s ease;
+}
+
+.theme-toggle:hover {
+    background-color: var(--color-accent);
+    color: var(--color-accent-text);
+    border-color: var(--color-accent);
+    transform: rotate(30deg);
+}
+
+
+/* =============================================================================
+   MODAL PDF — Animaciones y estilos
+   ============================================================================= */
+
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+    transition: opacity 0.2s ease;
+}
+
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+    opacity: 0;
+}
+
+.modal-fade-enter-active > div,
+.modal-fade-leave-active > div {
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.modal-fade-enter-from > div,
+.modal-fade-leave-to > div {
+    transform: scale(0.96) translateY(8px);
+    opacity: 0;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.animate-spin {
+    animation: spin 0.7s linear infinite;
+}
+
+
+/* =============================================================================
+   LAYOUT LIBRO — Dashboard (índice + contenido como libro abierto)
+   ============================================================================= */
+
+.book-container {
+    display: flex;
+    align-items: flex-start;
+    border-radius: 14px;
+    border: 1px solid var(--color-border);
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.12),
+        0 8px 32px rgba(0, 0, 0, 0.18);
+    min-height: 520px;
+    background: var(--color-panel);
+}
+
+[data-theme="light"] .book-container {
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.06),
+        0 8px 32px rgba(0, 0, 0, 0.10);
+}
+
+/* --- Página izquierda: índice / tabla de contenidos --- */
+.book-index {
+    width: 270px;
+    flex-shrink: 0;
+    position: sticky;
+    top: 1rem;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-panel);
+    border-right: 1px solid var(--color-border);
+    border-radius: 14px 0 0 14px;
+}
+
+/* Efecto de lomo del libro (sombra en el borde derecho del índice) */
+.book-index::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: 0;
+    bottom: 0;
+    width: 16px;
+    background: linear-gradient(to left, rgba(0, 0, 0, 0.10), transparent);
+    pointer-events: none;
+    z-index: 1;
+}
+
+[data-theme="light"] .book-index::after {
+    background: linear-gradient(to left, rgba(0, 0, 0, 0.05), transparent);
+}
+
+.book-index-header {
+    padding: 1.25rem 1.5rem 1rem;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.book-index-items {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem 0;
+}
+
+/* --- Página derecha: contenido --- */
+.book-content {
+    flex: 1;
+    min-width: 0;
+    padding: 1.75rem;
+}
+
+/* --- Items del índice (tabla de contenidos) --- */
+.sidebar-nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.75rem 1.5rem;
+    text-align: left;
+    font-size: 0.9375rem;
+    font-family: 'Inter', sans-serif;
+    color: var(--color-text-muted);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-nav-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 25%;
+    bottom: 25%;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: transparent;
+    transition: background-color 0.2s ease;
+}
+
+.sidebar-nav-item:hover {
+    background-color: var(--color-panel-hover);
+    color: var(--color-text);
+}
+
+.sidebar-nav-item.active {
+    color: var(--color-accent);
+    font-weight: 600;
+    background-color: var(--color-sidebar-active-bg);
+}
+
+.sidebar-nav-item.active::before {
+    background: var(--color-accent);
+}
+
+
+/* =============================================================================
+   ACCESIBILIDAD — foco visible por teclado
+   ============================================================================= */
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+.sidebar-nav-item:focus-visible {
+    outline: 3px solid var(--color-accent);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* No mostrar el outline al hacer click con ratón (solo teclado) */
+:focus:not(:focus-visible) {
+    outline: none;
+}
+
+
+/* =============================================================================
+   OVERLAY DE CARGA — feedback durante fetch (BD/CSV lentos)
+   ============================================================================= */
+
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    background: color-mix(in srgb, var(--color-bg) 70%, transparent);
+    backdrop-filter: blur(2px);
+}
+
+.loading-spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid var(--color-border);
+    border-top-color: var(--color-accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+}
+
+.loading-overlay span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+}
+
+
+/* =============================================================================
+   RESPONSIVE — estación táctil / pantallas estrechas (<768px)
+   ============================================================================= */
+
+@media (max-width: 768px) {
+    /* El layout "libro" pasa a apilar índice arriba y contenido debajo */
+    .book-container {
+        flex-direction: column;
+        min-height: 0;
+    }
+
+    .book-index {
+        width: 100%;
+        position: static;
+        border-right: none;
+        border-bottom: 1px solid var(--color-border);
+        border-radius: 14px 14px 0 0;
+    }
+
+    .book-index::after { display: none; }
+
+    .book-index-items {
+        display: flex;
+        flex-wrap: wrap;
+        overflow-x: auto;
+    }
+
+    .sidebar-nav-item {
+        width: auto;
+        flex: 1 1 auto;
+        justify-content: center;
+        padding: 0.75rem 1rem;
+    }
+
+    .book-content { padding: 1.25rem; }
+}
