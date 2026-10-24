@@ -39,7 +39,7 @@ services:
     volumes:
       - ./db/flyway:/flyway/sql:ro
     command:
-      - -url=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC
+      - -url=jdbc:mysql://mysql:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       - -user=${MYSQL_USER}
       - -password=${MYSQL_PASSWORD}
       - -locations=filesystem:/flyway/sql
