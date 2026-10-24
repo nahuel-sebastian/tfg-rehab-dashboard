@@ -1,104 +1,104 @@
-# Panel clínico para análisis de sesiones de rehabilitación robótica
+# Clinical Dashboard for Robot-Assisted Rehabilitation
 
-Trabajo de Fin de Grado, Grado en Ingeniería Informática, Universidad Carlos III
-de Madrid. Curso 2025-2026.
+**A web dashboard that turns the raw data of upper-limb rehabilitation games into biomechanical metrics a therapist can read: 3D trajectory replay, speed profiles, fatigue, bilateral asymmetry and dysmetria.**
 
-Panel web para el análisis cinemático de sesiones de rehabilitación de la
-extremidad superior. Toma los datos que registran las pruebas **Box and Blocks
-Test** y **Fruits** (trayectorias tridimensionales de la mano, puntuaciones y
-métricas temporales) y los transforma en métricas biomecánicas interpretables:
-distancia, velocidad, eficiencia, índice de fatiga, asimetría bilateral y
-dismetría.
+Bachelor's Thesis (TFG) · BSc in Computer Science and Engineering · Universidad Carlos III de Madrid · 2025–2026
 
----
+<p align="center">
+  <img src="docs/screenshots/replay-3d.png" width="49%" alt="3D reconstruction of a hand trajectory with grasp points">
+  <img src="docs/screenshots/biomechanics.png" width="49%" alt="Biomechanical summary and motor profile against a clinical reference">
+  <img src="docs/screenshots/hand-comparison.png" width="49%" alt="Right vs. left hand comparison for a Box and Blocks session">
+  <img src="docs/screenshots/velocity.png" width="49%" alt="Velocity profile over a session">
+</p>
 
-## Puesta en marcha
+<p align="center"><sub>Screenshots of the sample patient <code>sim-nahuel</code>, running without a database.</sub></p>
 
-Requisitos: Docker y Docker Compose. Nada más: el frontend no tiene cadena de
-compilación y las bibliotecas de cliente van auto-alojadas.
+## The problem
 
-```bash
-cp .env.example .env      # y rellenar las credenciales
-docker compose up --build
+The rehabilitation platform at UC3M runs therapy games, such as the **Box and Blocks Test** and **Fruits**, on a desktop setup and in VR (Meta Quest). Every session records the 3D position of the hand several times per second, plus scores and timings. That raw telemetry isn't something a therapist can act on: what they need is how far and how fast the patient moved, how efficiently, whether they got tired, and whether one side performs worse than the other.
+
+## The solution
+
+A web dashboard for a local clinical workstation that reads that data and presents it as interpretable metrics:
+
+- **Biomechanics per hand:** trajectory length, mean and peak speed, reach and transport time, transitions, an efficiency ratio, and a motor profile radar compared against a clinical reference.
+- **3D reconstruction and replay** of the hand trajectory. You can filter by grasp, show a heatmap, isolate a segment of frames and replay it.
+- **Velocity profile** over the session, with the grasp intervals highlighted.
+- **Fatigue index** across the session and **bilateral asymmetry** alerts, with a side-by-side right vs. left comparison.
+- **Session history and evolution** per patient, with date filters.
+- **PDF report export** and a "copy summary" button for clinical notes.
+- **Offline by design:** the frontend has no build step and serves its libraries locally, so the dashboard works on a workstation with no internet access.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Sources["Data sources (graceful degradation)"]
+        SQL[("MySQL<br/>platform schema")]
+        CSV["CSV trajectory files"]
+        MOCK["Simulated data"]
+    end
+    API["FastAPI backend<br/>analysis services"]
+    UI["Vue 3 SPA<br/>Plotly · jsPDF<br/>(served by nginx)"]
+    SQL --> API
+    CSV --> API
+    MOCK --> API
+    API <--> UI
 ```
 
-Un único comando levanta los cuatro servicios:
+- **Backend (FastAPI):** routers per domain (patients, BBT, Fruits, CSV) and analysis services that compute the metrics from the raw trajectories.
+- **Degradation chain:** the API reads from the platform's MySQL database when it is available. If not, it reads the CSV files the games write to disk, and as a last resort it serves a simulated data set.
+- **Frontend:** a Vue 3 single-page app with no build chain, Plotly for the 3D and time-series charts, and jsPDF for reports. All libraries are self-hosted in `frontend/vendor/`.
+- **Deployment:** Docker Compose with MySQL, Flyway migrations, the API and nginx.
 
-| Servicio | Qué hace | Puerto |
-|---|---|---|
-| `mysql` | Base de datos | 3307 |
-| `flyway` | Construye el esquema y termina | — |
-| `api` | API de análisis (FastAPI) | 8000 |
-| `frontend` | Interfaz (nginx) | 80 |
+## Verification with synthetic patients
 
-- Interfaz: <http://localhost>
-- Documentación interactiva de la API: <http://localhost:8000/docs>
+No real patient data could be used, so I built a **generator of clinically motivated synthetic patients** (`scripts/seed_synthetic_patients.py`). It does not inject the expected metric values. Instead, it translates documented motor mechanisms into movement-generation parameters: cerebellar dysmetria, spasticity, spatial neglect and fatigability. The metrics then emerge from the synthesized trajectory.
 
-## Datos
+- Each patient comes from a JSON recipe with a fixed seed (`scripts/presets/`), so the result is exactly reproducible.
+- `--verify` queries the API and checks that the dashboard detects what was injected. This loop found a real bug that neither the unit tests nor manual inspection had caught.
+- `scripts/bench/` measures the scaling of the analysis layer, API latency and 3D viewer performance, and runs a **sensitivity sweep** over the clinical thresholds.
+- The backend has 34 automated tests, which run in GitHub Actions on every push.
 
-**La base arranca vacía.** El esquema se construye a partir de las migraciones de
-`db/flyway/`, que no incluyen datos de pacientes.
+The clinical validation of the thresholds would require real patients, and the thesis states it explicitly as future work.
 
-Para poblarla con los pacientes sintéticos que ilustran la memoria:
+## Running it
 
-```bash
-docker compose exec api python scripts/seed_synthetic_patients.py --preset todos
-docker compose exec api python scripts/seed_synthetic_patients.py --verify
-```
-
-Cada paciente se genera a partir de una **receta JSON con semilla fija**
-(`scripts/presets/`), de modo que el resultado es reproducible de forma exacta.
-La opción `--verify` consulta la API y comprueba que el sistema detecta lo que se
-inyectó. `--clean` elimina los pacientes `SIM-*`.
-
-El sistema también funciona **sin base de datos**: degrada al análisis de los
-ficheros CSV de `backend/Patients/` y, si tampoco los hay, a datos simulados.
-
-## Pruebas
+Requirements: Docker with Docker Compose.
 
 ```bash
-cd backend && python -m pytest -q
+cp .env.example .env
+docker compose up -d --build api frontend
 ```
 
-34 pruebas que no requieren base de datos: se ejecutan sobre el camino
-degradado. Se lanzan también en integración continua en cada cambio
-(`.github/workflows/`).
+- Dashboard: http://localhost
+- Interactive API docs: http://localhost:8000/docs
 
-## Mediciones de rendimiento
+This starts the dashboard **without a database**. It reads the sample patient in `backend/Patients/` (`sim-nahuel`, one desktop and one VR session) and falls back to simulated data for the rest.
 
-En `scripts/bench/`:
+> **About the database.** The full mode runs on the shared database of the department's rehabilitation platform. The dashboard consumes that schema; it didn't create it. The schema isn't included in this repository, so `db/flyway/` only contains the incremental migrations on top of it. To use the full mode and the synthetic patient generator, you need access to that platform schema.
 
-| Guion | Qué mide |
+Tests:
+
+```bash
+cd backend && pip install -r requirements-dev.txt && python -m pytest -q
+```
+
+## Tech stack
+
+| Layer | Technologies |
 |---|---|
-| `bench_analisis.py` | Escalado de la capa de análisis |
-| `bench_endpoints.py` | Latencia de la API |
-| `barrido_umbrales.py` | Sensibilidad de los umbrales clínicos |
-| `bench_navegador.js` | Carga del visor 3D, cadencia y tiempo de informe |
+| Backend | Python 3.12, FastAPI, Pydantic, SQLAlchemy, PyMySQL |
+| Frontend | Vue 3 (no build step), Plotly.js, jsPDF, Tailwind CSS |
+| Data | MySQL 8, Flyway, CSV telemetry from the rehabilitation games |
+| Infra | Docker Compose, nginx, GitHub Actions |
 
-El último se pega en la consola del navegador con un panel de BBT abierto.
+## Context
 
-## Estructura
+- **Thesis:** *Programación de Interfaz Web para generación de reportes clínicos para terapias asistidas por robot* (web interface for generating clinical reports for robot-assisted therapies). The full report, in Spanish, is in [`20260907_tfg_panel_clinico.pdf`](20260907_tfg_panel_clinico.pdf).
+- **Individual project**, supervised by a tutor from the department that runs the rehabilitation platform.
+- **Data:** this public copy contains no patient data. The only sample, `sim-nahuel`, is a single test recording under a neutral name. The original test files were removed from the history.
 
-```
-backend/     API FastAPI: routers por dominio y servicios de análisis
-frontend/    Interfaz Vue 3 sin compilación, con vendor/ auto-alojado
-scripts/     Generador de pacientes sintéticos y bancos de medición
-db/flyway/   Migraciones del esquema
-```
+## License
 
-## Sobre el esquema de base de datos
-
-El esquema procede de la plataforma del departamento y queda fuera del alcance
-de este trabajo: el panel es un consumidor de ese esquema, no su autor. Las
-migraciones se incluyen para que el sistema sea reproducible por un tercero.
-**Se han suprimido los usuarios de prueba que traía el volcado original**, de
-modo que el repositorio no distribuye datos de identificación de personas.
-
-## Licencia
-
-El código se entrega a la Universidad Carlos III de Madrid, que puede usarlo,
-modificarlo, extenderlo y desplegarlo con fines docentes y de investigación.
-Fuera de ese ámbito, todos los derechos quedan reservados. Véase `LICENSE`.
-
-Las bibliotecas de `frontend/vendor/` y las tipografías de `frontend/css/fonts/`
-conservan sus propias licencias junto a los ficheros.
+All rights reserved, except for the use granted to Universidad Carlos III de Madrid for teaching and research (see [`LICENSE`](LICENSE), in Spanish). The libraries in `frontend/vendor/` and the fonts in `frontend/css/fonts/` keep their own licenses.
