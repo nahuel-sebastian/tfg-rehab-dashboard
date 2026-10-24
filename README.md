@@ -97,6 +97,7 @@ cd backend && pip install -r requirements-dev.txt && python -m pytest -q
 
 - **Thesis:** *Programación de Interfaz Web para generación de reportes clínicos para terapias asistidas por robot* (web interface for generating clinical reports for robot-assisted therapies). The full report, in Spanish, is in [`20260907_tfg_panel_clinico.pdf`](20260907_tfg_panel_clinico.pdf).
 - **Individual project**, supervised by a tutor from the department that runs the rehabilitation platform.
+- **AI use:** I used generative AI (Claude) to discuss design alternatives and to draft simpler pieces of code. I made the decisions, tested everything and debugged by hand. It is declared in Annex C of the report.
 - **Data:** this public copy contains no patient data. The only sample, `sim-nahuel`, is a single test recording under a neutral name. The original test files were removed from the history.
 
 ## License
